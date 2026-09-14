@@ -1,0 +1,31 @@
+{
+  "name": "research-chad",
+  "version": "0.0.1",
+  "description": "A plugin for Opencode to scan an LLM generated table of contents for data retrieval from local LLM distilled files.",
+  "license": "MIT",
+  "type": "module",
+  "main": "./dist/index.js",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "types": "./dist/index.d.ts",
+  "files": [
+    "dist",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "prepublishOnly": "npm run build"
+  },
+  "peerDependencies": {
+    "@opencode/plugin": "^2.0.0"
+  },
+  "devDependencies": {
+    "@opencode/plugin": "^2.0.0",
+    "@types/bun": "^1.4.2",
+    "typescript": "^5.x"
+  }
+}
