@@ -2,6 +2,10 @@
   "name": "research-chad",
   "version": "0.0.1",
   "description": "A plugin for Opencode to scan an LLM generated table of contents for data retrieval from local LLM distilled files.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dusty211/research-chad.git"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
