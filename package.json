@@ -31,19 +31,25 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit -p tsconfig.json",
     "check": "npm run lint && npm run typecheck && npm run format:check && npm test",
+    "docs:grab": "node scripts/docs-grab.mjs",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
     "@opencode/plugin": "^2.0.0"
   },
   "devDependencies": {
+    "@mozilla/readability": "^0.6.0",
     "@opencode/plugin": "^2.0.0",
     "@types/bun": "^1.4.2",
     "@types/node": "^26.5.1",
     "eslint": "^10.10.0",
     "eslint-config-prettier": "^10.1.8",
     "eslint-plugin-prettier": "^5.5.6",
+    "jsdom": "^30.0.1",
+    "playwright": "^1.63.0",
     "prettier": "^3.9.6",
+    "turndown": "^7.2.4",
+    "turndown-plugin-gfm": "^1.0.2",
     "typescript": "^5.x",
     "typescript-eslint": "^8.70.0",
     "vitest": "^5.0.0"

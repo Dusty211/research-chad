@@ -17,6 +17,7 @@
 ## Opencode-docs
 
 - There is a specific directory to be used with Opencode's references feature. Consult the `opencode-docs` reference at: `opencode-docs/INDEX.md` for the index.
+- `opencode-docs/plugin-docs/` is populated by `npm run docs:grab` (Playwright + Readability + Turndown). Re-run it to refresh; add a page permanently by editing `DEFAULT_PAGES` in `scripts/docs-grab.mjs`, or one-off via `npm run docs:grab -- -u <url> [-o <file>]` (the `--` separates npm from the script's args).
 
 ## What this project is
 
@@ -30,12 +31,14 @@ An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/ind
 - `npm run check` — the one-command gate: `lint -> typecheck -> format:check -> test`. Run this before considering work done.
 - Individual steps: `npm run lint` / `lint:fix`, `npm run typecheck`, `npm run format` / `format:check`, `npm test` (or `test:watch`)
 - Single test: `npx vitest run -t "test name substring"` or `npx vitest run src/index.test.ts`
+- `npm run docs:grab` — fetch OpenCode V2 doc pages into `opencode-docs/plugin-docs/` (see Opencode-docs section)
 
 ## Tooling notes
 
 - ESLint 10 flat config in `eslint.config.js`: typescript-eslint recommended + Prettier. The prettier plugin's preset uses the legacy `extends` key which flat config rejects, so it is expanded manually in that file — don't "simplify" it back to `eslintPluginPrettier.configs.recommended`.
 - Prettier runs pure defaults (no `.prettierrc`). `lint --fix` also formats.
 - Vitest 5; tests live next to source as `src/*.test.ts`. Two tsconfigs on purpose: `tsconfig.json` is the typecheck scope (everything in `src/`, no emit options) and `tsconfig.build.json` extends it just for emitting `dist/` (adds outDir/rootDir/declaration, excludes `**/*.test.ts`). Don't merge them back — "what we publish" and "what we typecheck" are different concerns.
+- `scripts/` is plain `.mjs`, intentionally outside the TS build/typecheck scope but inside lint + format. `opencode-docs/` is ignored by both ESLint and Prettier — it's external reference content that must never be linted, formatted, or rewritten.
 
 ## Gotchas
 
