@@ -1,0 +1,5 @@
+# Default owner for everything in this repo.
+# GitHub requires this file to live at the repo root, docs/, or .github/.
+# The last matching pattern wins, so add more specific rules above the catch-all.
+
+*       @Dusty211
