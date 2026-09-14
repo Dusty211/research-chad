@@ -1,3 +1,4 @@
+import { readFile } from "node:fs/promises";
 import { Plugin } from "@opencode/plugin";
 
 export default Plugin.define({
@@ -6,7 +7,8 @@ export default Plugin.define({
     ctx.tool.transform((editor) => {
       editor.add({
         name: "read_verbatim",
-        description: "Read a local file and return its full content with no truncation.",
+        description:
+          "Read a local file and return its full content with no truncation.",
         input: {
           type: "object",
           properties: { path: { type: "string" } },
@@ -17,8 +19,10 @@ export default Plugin.define({
           //    it does NOT infer from the JSON Schema, so we cast/validate by hand).
           const { path } = input as { path: string };
 
-          // 2. Read the whole file with no truncation (Bun-native, streams large files).
-          const text = await Bun.file(path).text();
+          // 2. Read the whole file with no truncation. node:fs/promises is
+          //    portable across Node and Bun (Bun.file would not run in a plain
+          //    Node test environment).
+          const text = await readFile(path, "utf8");
 
           // 3. Return a Tool.Result — `content` is what the model receives.
           return { content: text };

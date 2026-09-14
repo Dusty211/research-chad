@@ -8,10 +8,11 @@ An [OpenCode](https://opencode.ai) v2 plugin that registers a `read_verbatim` to
 npm install
 ```
 
-## Build
+## Build & verify
 
 ```bash
-npm run build   # tsc -> dist/
+npm run build    # tsc -> dist/
+npm run check    # lint + typecheck + format check + tests, in one command
 ```
 
 The package entrypoint is `dist/index.js` (built artifact; commit nothing to `dist/`).
@@ -32,8 +33,8 @@ The tool takes a single input:
 
 ## Development
 
-- Source lives in `src/index.ts`; see [AGENTS.md](./AGENTS.md) for repo conventions and gotchas.
-- There is no test or lint setup; verify with `npx tsc --noEmit`.
+- Source lives in `src/index.ts`; tests in `src/*.test.ts` (Vitest). See [AGENTS.md](./AGENTS.md) for repo conventions and gotchas.
+- Lint/format with ESLint + Prettier; verify everything with `npm run check`.
 
 ## License
 
