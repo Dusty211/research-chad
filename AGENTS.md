@@ -5,6 +5,15 @@
 - You are only permitted to use Git operations that are read only and do not modify anything.
 - Never perform any operation with Git which modifies the git state or the data on disk.
 
+# Working guidelines
+
+- Use consistent best practices and consistent patterns across the project.
+- Use DRY (don't repeat yourself) practices where it makes sense.
+- Quality comes first before speed.
+- Do not keep history in code comments.
+- If code comments exist, they should document things which are not obvious from the code itself.
+- all documentation and comment updates ship at the same time as their related code changes.
+
 ## What this project is
 
 An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/index.ts` exports a `Plugin.define(...)` default that registers tools via `ctx.tool.transform`. `dist/` is build output — never edit it; run `npm run build` to regenerate.
