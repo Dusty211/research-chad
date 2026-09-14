@@ -20,8 +20,6 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
-      # Split out so the PR page shows one itemized line per gate instead of
-      # a single opaque "npm run check" entry.
       - name: Check linting
         run: npm run lint
 
