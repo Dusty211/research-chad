@@ -5,7 +5,7 @@ on:
 
 jobs:
   check:
-    name: Check
+    name: Full code check
     runs-on: ubuntu-latest
     steps:
       - name: Checkout
@@ -22,14 +22,14 @@ jobs:
 
       # Split out so the PR page shows one itemized line per gate instead of
       # a single opaque "npm run check" entry.
-      - name: Lint
+      - name: Check linting
         run: npm run lint
 
-      - name: Typecheck
+      - name: Typechecking
         run: npm run typecheck
 
-      - name: Format check
+      - name: Check formatting
         run: npm run format:check
 
-      - name: Test
+      - name: Run tests
         run: npm test
