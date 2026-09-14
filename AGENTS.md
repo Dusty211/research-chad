@@ -31,7 +31,7 @@ An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/ind
 - `npm run check` — the one-command gate: `lint -> typecheck -> format:check -> test`. Run this before considering work done.
 - Individual steps: `npm run lint` / `lint:fix`, `npm run typecheck`, `npm run format` / `format:check`, `npm test` (or `test:watch`)
 - Single test: `npx vitest run -t "test name substring"` or `npx vitest run src/index.test.ts`
-- `npm run docs:grab` — fetch OpenCode V2 doc pages into `opencode-docs/plugin-docs/` (see Opencode-docs section)
+- `npm run docs:grab` — fetch OpenCode V2 doc pages into `opencode-docs/plugin-docs/`; `-- --help` for usage (no args = defaults, `-u <url> [-o <file>]` for specific pages)
 
 ## Tooling notes
 
