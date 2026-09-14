@@ -78,6 +78,15 @@ turndown.addRule("astro-code-pre", {
   replacement: (_content, node) => fenceFor(node),
 });
 
+// Drop inline data: images (e.g. base64 SVG icons) so they don't leak into the
+// markdown as unusable blobs. Normal http(s) images are left to turndown.
+turndown.addRule("drop-data-images", {
+  filter: (node) =>
+    node.nodeName === "IMG" &&
+    (node.getAttribute("src") || "").startsWith("data:"),
+  replacement: () => "",
+});
+
 function extractArticle(document) {
   const parsed = new Readability(document, { charThreshold: 200 }).parse();
   if (parsed && parsed.textContent.trim().length > 100) return parsed;
@@ -86,7 +95,9 @@ function extractArticle(document) {
   return { title: document.title, content: fallback.innerHTML };
 }
 
-function toMarkdown(parsed) {
+// Converts a Readability-style { title, content } result to clean GFM. Exported
+// for testing; the Playwright fetch path is intentionally not unit-tested.
+export function htmlToMarkdown(parsed) {
   const dom = new JSDOM(`<html><body>${parsed.content}</body></html>`);
   const doc = dom.window.document;
   // Prefer the first H1 in the content over Readability's title, which may
@@ -115,7 +126,7 @@ async function grabPage(browser, url) {
 
 // Derive a filename from a URL path, e.g. .../build/plugins/migrate-v1/ ->
 // plugins-migrate-v1.md. Empty or dot-only segments are dropped.
-function filenameFromUrl(url) {
+export function filenameFromUrl(url) {
   const segs = new URL(url).pathname.split("/").filter((s) => s && s !== ".");
   const base = (segs.at(-1) ?? "index").replace(/\.html?$/, "");
   return `${base}.md`;
@@ -140,7 +151,7 @@ const ITEM_RE = /(-u|--url) (\S+)(?: (-o|--out) (\S+))?/g;
 // items tile the entire input (no leading/trailing/gap tokens) and every URL
 // validates; throws otherwise (the caller prints help). Returns
 // [url, filename|null] pairs.
-function parsePages(argv) {
+export function parsePages(argv) {
   const joined = argv.join(" ");
   const pages = [];
   // Items are separated by exactly one space in the joined string, so the next
@@ -207,7 +218,7 @@ async function main() {
     for (const [url, filename] of pages) {
       try {
         const parsed = await grabPage(browser, url);
-        const { title, markdown } = toMarkdown(parsed);
+        const { title, markdown } = htmlToMarkdown(parsed);
         const out = `# ${title}\n\nSource: ${url}\n\n${markdown}\n`;
         const outPath = path.isAbsolute(filename)
           ? filename
