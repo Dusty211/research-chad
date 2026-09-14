@@ -2,6 +2,10 @@
   "name": "research-chad",
   "version": "0.0.1",
   "description": "A plugin for Opencode to scan an LLM generated table of contents for data retrieval from local LLM distilled files.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Dusty211/research-chad.git"
+  },
   "license": "MIT",
   "type": "module",
   "main": "./dist/index.js",
@@ -17,7 +21,15 @@
     "LICENSE"
   ],
   "scripts": {
-    "build": "tsc -p tsconfig.json",
+    "build": "tsc -p tsconfig.build.json",
+    "lint": "eslint .",
+    "lint:fix": "eslint . --fix",
+    "format": "prettier --write .",
+    "format:check": "prettier --check .",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "check": "npm run lint && npm run typecheck && npm run format:check && npm test",
     "prepublishOnly": "npm run build"
   },
   "peerDependencies": {
@@ -26,6 +38,13 @@
   "devDependencies": {
     "@opencode/plugin": "^2.0.0",
     "@types/bun": "^1.4.2",
-    "typescript": "^5.x"
+    "@types/node": "^26.5.1",
+    "eslint": "^10.10.0",
+    "eslint-config-prettier": "^10.1.8",
+    "eslint-plugin-prettier": "^5.5.6",
+    "prettier": "^3.9.6",
+    "typescript": "^5.x",
+    "typescript-eslint": "^8.70.0",
+    "vitest": "^5.0.0"
   }
 }
