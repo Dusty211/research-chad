@@ -19,7 +19,7 @@ The package entrypoint is `dist/index.js` (built artifact; commit nothing to `di
 
 ## Usage
 
-Add the plugin to your OpenCode config (`opencode.json`) so the `read_verbatim` tool becomes available to the model. Once published, use the package name; for local development, point at a path:
+Add the plugin to your OpenCode config (`opencode.json`) so the `read_verbatim` tool becomes available to the model:
 
 ```jsonc
 {

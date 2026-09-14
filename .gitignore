@@ -15,3 +15,8 @@ npm-debug.log*
 # OS noise
 .DS_Store
 Thumbs.db
+
+# Pre-publish testing
+opencode.json
+test-fixture.txt
+*.tgz

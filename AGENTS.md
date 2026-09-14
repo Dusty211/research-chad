@@ -26,6 +26,6 @@ An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/ind
 
 ## Gotchas
 
-- Tests run under Node, not Bun: don't use `Bun.*` APIs in `src/` — use `node:` builtins (e.g. `node:fs/promises`). `@types/bun` is still declared for types; that's fine.
+- The plugin runs under Bun in OpenCode, but tests run under Node: keep `src/` free of `Bun.*` globals so both can import it (`node:` builtins work in both).
 - Tool `input` arrives typed as `unknown` by design — validate/cast by hand in `execute`, don't rely on JSON Schema inference.
 - `module: NodeNext` + ESM: relative imports in `src/` need explicit `.js` extensions (even for `.ts` files).
