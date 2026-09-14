@@ -6,5 +6,11 @@
     "declaration": true,
     "noEmit": false
   },
-  "exclude": ["node_modules", "dist", "**/*.test.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "opencode-docs",
+    "opencode.json",
+    "**/*.test.ts"
+  ]
 }

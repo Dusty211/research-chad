@@ -14,6 +14,10 @@
 - If code comments exist, they should document things which are not obvious from the code itself.
 - all documentation and comment updates ship at the same time as their related code changes.
 
+## Opencode-docs
+
+- There is a specific directory to be used with Opencode's references feature. Consult the `opencode-docs` reference at: `opencode-docs/INDEX.md` for the index.
+
 ## What this project is
 
 An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/index.ts` exports a `Plugin.define(...)` default that registers tools via `ctx.tool.transform`. `dist/` is build output — never edit it; run `npm run build` to regenerate.
