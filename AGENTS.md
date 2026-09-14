@@ -1,6 +1,11 @@
 # AGENTS.md
 
-## What this is
+## Git is read-only
+
+- You are only permitted to use Git operations that are read only and do not modify anything.
+- Never perform any operation with Git which modifies the git state or the data on disk.
+
+## What this project is
 
 An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/index.ts` exports a `Plugin.define(...)` default that registers tools via `ctx.tool.transform`. `dist/` is build output — never edit it; run `npm run build` to regenerate.
 
