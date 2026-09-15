@@ -1,31 +1,130 @@
 import { readFile } from "node:fs/promises";
 import { Plugin } from "@opencode/plugin";
+import { AppError } from "./errors.js";
+import { validateOptions, type ChadOptions } from "./options.js";
+import { runScan } from "./pipeline/scan.js";
+import { runSearch } from "./pipeline/search.js";
+import type { GenerateCtx } from "./pipeline/model.js";
+import type { Hit, ToolError } from "./types.js";
+
+type ToolResult = { content: string };
+
+const readVerbatim = {
+  name: "read_verbatim",
+  description:
+    "Read a local file and return its full content with no truncation.",
+  input: {
+    type: "object" as const,
+    properties: { path: { type: "string" } },
+    required: ["path"],
+    additionalProperties: false,
+  },
+  execute: async (input: unknown): Promise<ToolResult> => {
+    try {
+      const { path } = input as { path: string };
+      // node:fs/promises is portable across Node and Bun (Bun.file would not
+      // run in a plain Node test environment).
+      const text = await readFile(path, "utf8");
+      return { content: text };
+    } catch (e) {
+      return errorContent(e);
+    }
+  },
+};
+
+const tocScan = {
+  description:
+    "Scan the research TOC for entries relevant to a query. Returns a JSON array of hits (dir, path, name, kind, depth 'toc', matchReason).",
+};
+
+const tocSearch = {
+  description:
+    "Full research search: scan the TOC for entries relevant to a query, then read each candidate file and confirm relevance. Returns a JSON array of hits (depth 'drilldown').",
+};
+
+/** Tools return JSON text: either the hits array or a structured error. */
+function hitsContent(hits: Hit[]): ToolResult {
+  return { content: JSON.stringify(hits) };
+}
+
+function errorContent(error: unknown): ToolResult {
+  const e: ToolError =
+    error instanceof AppError
+      ? { code: error.code, message: error.message }
+      : { code: "unknown", message: String(error) };
+  return { content: JSON.stringify({ ok: false, error: e }) };
+}
+
+const QUERY_SCHEMA = {
+  type: "object" as const,
+  properties: { query: { type: "string" } },
+  required: ["query"],
+  additionalProperties: false,
+};
 
 export default Plugin.define({
   id: "chad",
   setup(ctx) {
+    let opts: ChadOptions;
+    try {
+      opts = validateOptions(ctx.options);
+    } catch (e) {
+      // Misconfiguration is fatal to the TOC tools; register them as hard errors
+      // so the failure is visible at call time instead of a silent no-op.
+      const broken = async (): Promise<ToolResult> => errorContent(e);
+      ctx.tool.transform((editor) => {
+        editor.add({
+          name: "read_verbatim",
+          description: readVerbatim.description,
+          input: readVerbatim.input,
+          execute: broken,
+        });
+        editor.add({
+          name: "toc_scan",
+          description: tocScan.description,
+          input: QUERY_SCHEMA,
+          execute: broken,
+        });
+        editor.add({
+          name: "toc_search",
+          description: tocSearch.description,
+          input: QUERY_SCHEMA,
+          execute: broken,
+        });
+      });
+      return;
+    }
+
+    const generateCtx = ctx as unknown as GenerateCtx;
+
     ctx.tool.transform((editor) => {
+      editor.add(readVerbatim);
+
       editor.add({
-        name: "read_verbatim",
-        description:
-          "Read a local file and return its full content with no truncation.",
-        input: {
-          type: "object",
-          properties: { path: { type: "string" } },
-          required: ["path"],
+        name: "toc_scan",
+        description: tocScan.description,
+        input: QUERY_SCHEMA,
+        execute: async (input) => {
+          try {
+            const { query } = input as { query: string };
+            return hitsContent(await runScan(generateCtx, opts, query));
+          } catch (e) {
+            return errorContent(e);
+          }
         },
-        async execute(input) {
-          // 1. Narrow unknown -> our shape (the API types input as unknown on purpose;
-          //    it does NOT infer from the JSON Schema, so we cast/validate by hand).
-          const { path } = input as { path: string };
+      });
 
-          // 2. Read the whole file with no truncation. node:fs/promises is
-          //    portable across Node and Bun (Bun.file would not run in a plain
-          //    Node test environment).
-          const text = await readFile(path, "utf8");
-
-          // 3. Return a Tool.Result — `content` is what the model receives.
-          return { content: text };
+      editor.add({
+        name: "toc_search",
+        description: tocSearch.description,
+        input: QUERY_SCHEMA,
+        execute: async (input) => {
+          try {
+            const { query } = input as { query: string };
+            return hitsContent(await runSearch(generateCtx, opts, query));
+          } catch (e) {
+            return errorContent(e);
+          }
         },
       });
     });
