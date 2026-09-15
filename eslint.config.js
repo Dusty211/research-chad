@@ -3,7 +3,7 @@ import eslintPluginPrettier from "eslint-plugin-prettier";
 import eslintConfigPrettier from "eslint-config-prettier/flat";
 
 export default [
-  { ignores: ["dist/", "node_modules/"] },
+  { ignores: ["dist/", "node_modules/", "opencode-docs/"] },
   ...tseslint.configs.recommended,
   // Run Prettier as a lint rule so `lint --fix` also formats.
   // eslint-plugin-prettier's preset uses the legacy `extends` key, which flat

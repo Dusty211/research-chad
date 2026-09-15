@@ -16,10 +16,6 @@ npm-debug.log*
 .DS_Store
 Thumbs.db
 
-# Opencode flow
-opencode-docs
-
 # Pre-publish testing
-opencode.json
 test-fixture.txt
 *.tgz
