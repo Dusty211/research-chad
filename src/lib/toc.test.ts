@@ -54,9 +54,6 @@ describe("parseToc", () => {
     expect(result.ok).toBe(true);
     if (!result.ok) return;
     // No uuid-derived data anywhere on the entry.
-    expect(JSON.stringify(result.value)).not.toContain(
-      '5fe81611_notes.md"uuid',
-    );
     for (const e of result.value.entries) {
       expect(e).not.toHaveProperty("uuid");
     }

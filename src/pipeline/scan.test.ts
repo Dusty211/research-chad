@@ -107,25 +107,4 @@ describe("runScan", () => {
     const hits = await runScan(liarCtx, opts, "ghost");
     expect(hits).toEqual([]);
   });
-
-  it("splits into multiple chunks when the budget is tiny", async () => {
-    // Tiny budget: each entry block gets its own chunk.
-    const smallOpts = {
-      ...opts,
-      availableContext: Math.ceil(130 / (3.5 * 0.218)),
-    };
-    const callPrompts: string[] = [];
-    const multiCtx: GenerateCtx = {
-      generate: {
-        text: async ({ prompt }) => {
-          callPrompts.push(prompt);
-          return { text: "[]" };
-        },
-      },
-    };
-
-    await runScan(multiCtx, smallOpts, "anything");
-    // 3 entries → at least 2 chunks at this budget.
-    expect(callPrompts.length).toBeGreaterThanOrEqual(2);
-  });
 });

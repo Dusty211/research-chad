@@ -43,7 +43,7 @@ export interface ChunkHit {
   matchReason: string;
 }
 
-/** Model output for stage 1: JSON array of {path, matchReason}. Enforces the 3-sentence matchReason. */
+/** Model output for stage 1: JSON array of {path, matchReason}. Enforces sentence shape on matchReason. */
 export function parseChunkResult(raw: string): Result<ChunkHit[]> {
   const parsed = parseJson(raw);
   if (!parsed.ok) return parsed;
@@ -51,11 +51,10 @@ export function parseChunkResult(raw: string): Result<ChunkHit[]> {
     return err(new ModelOutputError(describe(chunkValidator), raw));
   }
   for (const hit of parsed.value as ChunkHit[]) {
-    const sentences = countSentences(hit.matchReason);
-    if (sentences !== 3) {
+    if (!hasSentenceShape(hit.matchReason)) {
       return err(
         new ModelOutputError(
-          `matchReason must be exactly 3 sentences, got ${sentences}`,
+          "matchReason must contain at least two sentence boundaries (period + space) and be at least 20 characters",
           raw,
         ),
       );
@@ -81,7 +80,7 @@ export interface DrillResult {
   matchReason: string | null;
 }
 
-/** Model output for a completed drilldown. Enforces the 3-sentence matchReason when matching. */
+/** Model output for a completed drilldown. Enforces sentence shape on matchReason when matching. */
 export function parseDrillResult(raw: string): Result<DrillResult> {
   const parsed = parseJson(raw);
   if (!parsed.ok) return parsed;
@@ -89,24 +88,23 @@ export function parseDrillResult(raw: string): Result<DrillResult> {
     return err(new ModelOutputError(describe(drillResultValidator), raw));
   }
   const value = parsed.value as DrillResult;
-  if (value.match) {
-    const sentences = countSentences(value.matchReason ?? "");
-    if (sentences !== 3) {
-      return err(
-        new ModelOutputError(
-          `matchReason must be exactly 3 sentences, got ${sentences}`,
-          raw,
-        ),
-      );
-    }
+  if (value.match && !hasSentenceShape(value.matchReason ?? "")) {
+    return err(
+      new ModelOutputError(
+        "matchReason must contain at least two sentence boundaries (period + space) and be at least 20 characters",
+        raw,
+      ),
+    );
   }
   return ok(value);
 }
 
-/** Rough sentence count: split on terminal punctuation followed by whitespace or end. */
-export function countSentences(text: string): number {
-  const matches = text.trim().match(/[^.!?]+[.!?]+(\s|$)/g);
-  return matches?.length ?? (text.trim().length > 0 ? 1 : 0);
+/** Weak structural check: matchReason should look like multiple sentences.
+ *  Not a linguistic parse — a shape floor to catch lazy/degenerate output. */
+function hasSentenceShape(text: string): boolean {
+  const t = text.trim();
+  const boundaries = t.match(/\.{1,2} {1,2}/g)?.length ?? 0;
+  return boundaries >= 2 && t.length >= 20;
 }
 
 /** A validated stage-2 result promoted to a Hit. */

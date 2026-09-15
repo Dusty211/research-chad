@@ -1,6 +1,5 @@
 import { describe, it, expect } from "vitest";
 import {
-  countSentences,
   parseChunkResult,
   parseDrillPartResult,
   parseDrillResult,
@@ -56,13 +55,30 @@ describe("parseChunkResult", () => {
         .ok,
     ).toBe(false);
   });
+});
 
-  it("rejects a matchReason that is not exactly 3 sentences", () => {
+describe("matchReason shape", () => {
+  it("rejects a single-sentence matchReason", () => {
     const result = parseChunkResult(
-      JSON.stringify([{ path: "/a.md", matchReason: "Only two. Sentences." }]),
+      JSON.stringify([{ path: "/a.md", matchReason: "One lazy sentence." }]),
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toMatch(/3 sentences/);
+  });
+
+  it("rejects short degenerate output with periods", () => {
+    const result = parseChunkResult(
+      JSON.stringify([{ path: "/a.md", matchReason: "a. b. c." }]),
+    );
+    expect(result.ok).toBe(false);
+  });
+
+  it("accepts a multi-sentence matchReason", () => {
+    const result = parseChunkResult(
+      JSON.stringify([
+        { path: "/a.md", matchReason: "First fact. Second fact. Third fact." },
+      ]),
+    );
+    expect(result.ok).toBe(true);
   });
 });
 
@@ -94,7 +110,7 @@ describe("parseDrillPartResult", () => {
 });
 
 describe("parseDrillResult", () => {
-  it("accepts a match with exactly 3 sentences", () => {
+  it("accepts a match with multi-sentence shape", () => {
     const reason = "First sentence. Second sentence. Third sentence.";
     const result = parseDrillResult(
       `{"match": true, "matchReason": "${reason}"}`,
@@ -107,12 +123,11 @@ describe("parseDrillResult", () => {
     expect(result.ok).toBe(true);
   });
 
-  it("rejects a match whose matchReason is not exactly 3 sentences", () => {
+  it("rejects a match whose matchReason lacks sentence shape", () => {
     const result = parseDrillResult(
-      '{"match": true, "matchReason": "Only two sentences. Here they are."}',
+      '{"match": true, "matchReason": "One lazy sentence."}',
     );
     expect(result.ok).toBe(false);
-    if (!result.ok) expect(result.error.message).toMatch(/3 sentences/);
   });
 
   it("rejects a match with null matchReason", () => {
@@ -135,20 +150,5 @@ describe("toHit", () => {
       depth: "drilldown",
       matchReason: "One. Two. Three.",
     });
-  });
-});
-
-describe("countSentences", () => {
-  it("counts terminal-punctuation-delimited sentences", () => {
-    expect(countSentences("One. Two! Three?")).toBe(3);
-    expect(countSentences("One. Two! Three? Four.")).toBe(4);
-  });
-
-  it("treats text without punctuation as one sentence", () => {
-    expect(countSentences("no punctuation here")).toBe(1);
-  });
-
-  it("returns zero for empty text", () => {
-    expect(countSentences("")).toBe(0);
   });
 });
