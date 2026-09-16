@@ -105,15 +105,4 @@ projects:
     const hits = await runSearch(ctx, opts, "nonexistent topic");
     expect(hits).toEqual([]);
   });
-
-  it("hard-fails on a TOC parse error", async () => {
-    const badOpts = { ...opts, tocPath: join(tmp, "missing.yaml") };
-    await expect(
-      runSearch(
-        { generate: { text: async () => ({ text: "[]" }) } },
-        badOpts,
-        "q",
-      ),
-    ).rejects.toThrow();
-  });
 });

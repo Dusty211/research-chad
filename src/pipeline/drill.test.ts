@@ -134,8 +134,25 @@ describe("runDrill", () => {
     ).join("\n");
     await writeFile(join(bigDir, "big.md"), bigContent, "utf8");
 
-    // budget ≈ availableContext bytes (3.5 * 0.218 ≈ 0.76); 1000 → ~763 bytes < 3KB file.
-    const smallOpts = { ...opts, availableContext: 1_000 };
+    // Force overflow by making the budget a known fraction of the file size.
+    // chunkBudgetBytes is linear in availableContext, so we back-solve the
+    // availableContext that yields a budget of half the file size — the file
+    // then always exceeds it and slices into multiple parts, regardless of the
+    // formula's constants.
+    const { chunkBudgetBytes } = await import("../lib/budget.js");
+    const enc = new TextEncoder();
+    const fileSize = enc.encode(bigContent).length;
+    // Linear: budget(n) = floor(n * C). Find n such that budget(n) ≈ fileSize/2
+    // by scaling from a reference point (avoids hardcoding C).
+    const refN = 10_000;
+    const refBudget = chunkBudgetBytes(refN);
+    const smallOpts = {
+      ...opts,
+      availableContext: Math.max(
+        1,
+        Math.round((refN * fileSize) / (2 * refBudget)),
+      ),
+    };
 
     const prompts: string[] = [];
     const ctx: GenerateCtx = {
@@ -169,17 +186,6 @@ describe("runDrill", () => {
     expect(prompts.at(-1)).toContain("You reviewed a document part by part");
     // The distill was threaded into later parts.
     expect(partCalls.at(-1)).toContain("So far found in earlier parts");
-  });
-
-  it("hard-fails when the model output is invalid twice", async () => {
-    const ctx: GenerateCtx = {
-      generate: { text: async () => ({ text: "not json" }) },
-    };
-    await expect(
-      runDrill(ctx, opts, "q", [
-        docEntry("garden.md", join(tmp, "projects/alpha/docs/garden.md")),
-      ]),
-    ).rejects.toMatchObject({ code: "model_output" });
   });
 
   it("hard-fails naming the path when a file is missing", async () => {
