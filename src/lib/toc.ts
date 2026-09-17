@@ -1,3 +1,4 @@
+import { resolve as resolvePath, sep } from "node:path";
 import { parse as parseYaml } from "yaml";
 import { err, ok, TocParseError, type Result } from "../errors.js";
 import type { EntryKind, Toc, TocEntry } from "../types.js";
@@ -17,15 +18,19 @@ interface RawProject {
  * Resolve a TOC entry to its absolute file path. The filename in the TOC is
  * the identity — verbatim, no conventions. `kind` selects the subfolder:
  * docs live in <dir>/docs/, conversations in <dir>/summaries/.
+ * Returns null when the resolved path escapes baseDir (traversal or an
+ * absolute dir/name) — a TOC entry must stay inside the corpus.
  */
 export function resolveEntryPath(
   baseDir: string,
   dir: string,
   kind: EntryKind,
   name: string,
-): string {
+): string | null {
   const sub = kind === "doc" ? "docs" : "summaries";
-  return `${baseDir}/${dir}/${sub}/${name}`;
+  const resolved = resolvePath(baseDir, dir, sub, name);
+  const root = resolvePath(baseDir) + sep;
+  return resolved.startsWith(root) ? resolved : null;
 }
 
 /**
@@ -81,13 +86,16 @@ export function parseToc(yamlText: string, baseDir: string): Result<Toc> {
             )
           : [];
 
-        entries.push({
-          kind,
-          name,
-          path: resolveEntryPath(baseDir, projectDir, kind, name),
-          dir: projectDir,
-          summary,
-        });
+        const path = resolveEntryPath(baseDir, projectDir, kind, name);
+        if (path === null) {
+          return err(
+            new TocParseError(
+              `${projectDir} ${kind}[${j}] name '${name}' escapes baseDir`,
+            ),
+          );
+        }
+
+        entries.push({ kind, name, path, dir: projectDir, summary });
       }
       return ok(entries);
     };

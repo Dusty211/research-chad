@@ -129,6 +129,38 @@ describe("parseToc", () => {
     if (!result.ok) return;
     expect(result.value.entries[0].summary).toEqual(["ok"]);
   });
+
+  it("rejects an entry whose name traverses out of baseDir", () => {
+    const result = parseToc(
+      "projects:\n  - dir: projects/p\n    docs:\n      - name: '../../../../etc/passwd'\n        summary: [x]\n",
+      BASE,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("toc_parse");
+    expect(result.error.message).toMatch(/escapes baseDir/);
+  });
+
+  it("rejects an entry whose name is absolute", () => {
+    const result = parseToc(
+      "projects:\n  - dir: projects/p\n    docs:\n      - name: '/etc/passwd'\n        summary: [x]\n",
+      BASE,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("toc_parse");
+  });
+
+  it("rejects a project whose dir traverses out of baseDir", () => {
+    const result = parseToc(
+      "projects:\n  - dir: '../../home/user'\n    docs:\n      - name: d.md\n        summary: [x]\n",
+      BASE,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("toc_parse");
+    expect(result.error.message).toMatch(/escapes baseDir/);
+  });
 });
 
 describe("resolveEntryPath", () => {
@@ -144,5 +176,23 @@ describe("resolveEntryPath", () => {
         "5fe81611_notes.md",
       ),
     ).toBe(`${BASE}/projects/alpha/summaries/5fe81611_notes.md`);
+  });
+
+  it("returns null when the resolved path escapes baseDir", () => {
+    // Deep enough to climb out of <base>/projects/p/docs/.
+    expect(
+      resolveEntryPath(BASE, "projects/p", "doc", "../../../../etc/passwd"),
+    ).toBe(null);
+    expect(resolveEntryPath(BASE, "projects/p", "doc", "/etc/passwd")).toBe(
+      null,
+    );
+    expect(resolveEntryPath(BASE, "../../home/user", "doc", "d.md")).toBe(null);
+  });
+
+  it("keeps traversal names that normalize inside baseDir (names are verbatim)", () => {
+    // Normalizes to <base>/projects/etc/passwd — inside the corpus, so allowed.
+    expect(
+      resolveEntryPath(BASE, "projects/p", "doc", "../../etc/passwd"),
+    ).toBe(`${BASE}/projects/etc/passwd`);
   });
 });

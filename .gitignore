@@ -17,5 +17,7 @@ npm-debug.log*
 Thumbs.db
 
 # Pre-publish testing
-test-fixture.txt
 *.tgz
+
+# Development
+code-review/

@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { Plugin } from "@opencode/plugin";
 import { AppError } from "./errors.js";
 import { validateOptions, type ChadOptions } from "./options.js";
@@ -8,29 +7,6 @@ import type { GenerateCtx } from "./pipeline/model.js";
 import type { Hit, ToolError } from "./types.js";
 
 type ToolResult = { content: string };
-
-const readVerbatim = {
-  name: "read_verbatim",
-  description:
-    "Read a local file and return its full content with no truncation.",
-  input: {
-    type: "object" as const,
-    properties: { path: { type: "string" } },
-    required: ["path"],
-    additionalProperties: false,
-  },
-  execute: async (input: unknown): Promise<ToolResult> => {
-    try {
-      const { path } = input as { path: string };
-      // node:fs/promises is portable across Node and Bun (Bun.file would not
-      // run in a plain Node test environment).
-      const text = await readFile(path, "utf8");
-      return { content: text };
-    } catch (e) {
-      return errorContent(e);
-    }
-  },
-};
 
 const tocScan = {
   description:
@@ -69,16 +45,10 @@ export default Plugin.define({
     try {
       opts = validateOptions(ctx.options);
     } catch (e) {
-      // Misconfiguration is fatal to the TOC tools; register them as hard errors
-      // so the failure is visible at call time instead of a silent no-op.
+      // Misconfiguration is fatal to the plugin; register the TOC tools as hard
+      // errors so the failure is visible at call time instead of a silent no-op.
       const broken = async (): Promise<ToolResult> => errorContent(e);
       ctx.tool.transform((editor) => {
-        editor.add({
-          name: "read_verbatim",
-          description: readVerbatim.description,
-          input: readVerbatim.input,
-          execute: broken,
-        });
         editor.add({
           name: "toc_scan",
           description: tocScan.description,
@@ -98,8 +68,6 @@ export default Plugin.define({
     const generateCtx = ctx as unknown as GenerateCtx;
 
     ctx.tool.transform((editor) => {
-      editor.add(readVerbatim);
-
       editor.add({
         name: "toc_scan",
         description: tocScan.description,

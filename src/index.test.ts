@@ -81,18 +81,11 @@ function loadPlugin(options: unknown): Map<string, CapturedTool> {
 
 describe("research-chad plugin", () => {
   let tmp: string;
-  let fixturePath: string;
   let tocPath: string;
-  // Large enough that any plausible truncation limit (100 chars, 1KB, 10KB)
-  // would cut this off — the whole point of read_verbatim is no truncation.
-  let largeContent: string;
 
   beforeAll(async () => {
     tmp = await mkdtemp(join(tmpdir(), "research-chad-test-"));
-    fixturePath = join(tmp, "fixture.txt");
     tocPath = join(tmp, "TOC.yaml");
-    largeContent = `line one\n`.repeat(5_000) + "final marker"; // ~60KB
-    await writeFile(fixturePath, largeContent, "utf8");
     await writeFile(tocPath, "projects: []\n", "utf8");
   });
 
@@ -100,19 +93,9 @@ describe("research-chad plugin", () => {
     await rm(tmp, { recursive: true, force: true });
   });
 
-  it("registers exactly three tools with pinned schemas", () => {
+  it("registers exactly two tools with pinned schemas", () => {
     const tools = loadPlugin(makeOptions(tocPath));
-    expect(Array.from(tools.keys()).sort()).toEqual([
-      "read_verbatim",
-      "toc_scan",
-      "toc_search",
-    ]);
-
-    const verbatim = tools.get("read_verbatim")!;
-    expect(verbatim.description).toMatch(/no truncation/i);
-    expect((verbatim.input as { required: string[] }).required).toEqual([
-      "path",
-    ]);
+    expect(Array.from(tools.keys()).sort()).toEqual(["toc_scan", "toc_search"]);
 
     for (const name of ["toc_scan", "toc_search"]) {
       const schema = tools.get(name)!.input as {
@@ -124,31 +107,6 @@ describe("research-chad plugin", () => {
       expect(schema.required).toEqual(["query"]);
       expect(schema.properties.query).toEqual({ type: "string" });
     }
-  });
-
-  it("read_verbatim returns the complete file content with no truncation", async () => {
-    const tools = loadPlugin(makeOptions(tocPath));
-    const result = await tools
-      .get("read_verbatim")!
-      .execute({ path: fixturePath });
-
-    expect(result.content).toBe(largeContent);
-    // Belt and braces: assert the tail survived, which is what truncation would eat first.
-    expect(result.content.endsWith("final marker")).toBe(true);
-  });
-
-  it("read_verbatim returns a structured error for a missing file", async () => {
-    const tools = loadPlugin(makeOptions(tocPath));
-    const result = await tools
-      .get("read_verbatim")!
-      .execute({ path: join(tmp, "nope.txt") });
-
-    const parsed = JSON.parse(result.content) as {
-      ok: boolean;
-      error: { code: string };
-    };
-    expect(parsed.ok).toBe(false);
-    expect(parsed.error.code).toBe("unknown"); // raw fs error, not an AppError
   });
 
   it("toc_scan surfaces a structured error when the TOC has no entries", async () => {
@@ -165,18 +123,16 @@ describe("research-chad plugin", () => {
 
   it("registers hard-error tools when options are invalid", async () => {
     const tools = loadPlugin({});
-    expect(Array.from(tools.keys()).sort()).toEqual([
-      "read_verbatim",
-      "toc_scan",
-      "toc_search",
-    ]);
+    expect(Array.from(tools.keys()).sort()).toEqual(["toc_scan", "toc_search"]);
 
-    const result = await tools.get("toc_scan")!.execute({ query: "anything" });
-    const parsed = JSON.parse(result.content) as {
-      ok: boolean;
-      error: { code: string };
-    };
-    expect(parsed.ok).toBe(false);
-    expect(parsed.error.code).toBe("options");
+    for (const name of ["toc_scan", "toc_search"]) {
+      const result = await tools.get(name)!.execute({ query: "anything" });
+      const parsed = JSON.parse(result.content) as {
+        ok: boolean;
+        error: { code: string };
+      };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error.code).toBe("options");
+    }
   });
 });

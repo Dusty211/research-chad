@@ -1,41 +1,53 @@
 # research-chad
 
-An [OpenCode](https://opencode.ai) v2 plugin that registers a `read_verbatim` tool: it reads a local file and returns its full content with no truncation. This is an initial POC for the actual goal which is retrieving data from local LLM-distilled files via an LLM-generated table of contents.
+An [OpenCode](https://opencode.ai) v2 plugin that retrieves data from local LLM-distilled files via an LLM-generated table of contents. It registers two tools:
 
-## Install
+- `toc_scan` — scans the TOC for entries relevant to a query. Returns a JSON array of hits (`dir`, `path`, `name`, `kind`, `depth: "toc"`, `matchReason`).
+- `toc_search` — full search: scans the TOC, then reads each candidate file and confirms relevance. Returns a JSON array of hits (`depth: "drilldown"`).
 
-```bash
-npm install
-```
+Both tools take a single input:
 
-## Build & verify
+- `query` (string, required) — what you are looking for.
 
-```bash
-npm run build    # tsc -> dist/
-npm run check    # lint + typecheck + format check + tests, in one command
-```
+On failure both tools return a structured error object instead of a hits array: `{ "ok": false, "error": { "code", "message" } }`. Error codes: `toc_parse`, `chunk_budget`, `model_output`, `options`, `unknown`.
 
-The package entrypoint is `dist/index.js` (built artifact; commit nothing to `dist/`).
+## Setup
 
-## Usage
-
-Add the plugin to your OpenCode config (`opencode.json`) so the `read_verbatim` tool becomes available to the model:
+OpenCode installs the plugin itself — you only reference it in your config (`opencode.json` or `opencode.jsonc`) and provide its options:
 
 ```jsonc
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["research-chad"],
+  "plugins": [
+    {
+      "package": "research-chad",
+      "options": {
+        // Absolute path to the TOC.yaml for your research corpus.
+        "tocPath": "/path/to/corpus/TOC.yaml",
+        // Base directory that TOC project dirs are relative to.
+        "baseDir": "/path/to/corpus",
+        // Model context window in tokens; drives the chunk byte budget.
+        "availableContext": 262144,
+        // Model used for all generate calls.
+        "model": { "providerID": "anthropic", "id": "claude-sonnet-4-5" },
+      },
+    },
+  ],
 }
 ```
 
-The tool takes a single input:
+All four options are required. After adding or changing the config, restart the OpenCode service (`opencode service restart`) to pick it up.
 
-- `path` (string, required) — path to the local file to read.
+## Errors
+
+If any option is missing or invalid, both tools are registered as hard errors: every call returns `{ "ok": false, "error": { "code": "options", ... } }` with the specific validation message. Fix the config and restart the service.
+
+TOC entries must resolve to files inside `baseDir`; entries whose paths escape it (traversal or absolute `dir`/`name`) are rejected at parse time with a `toc_parse` error.
 
 ## Development
 
-- Source lives in `src/index.ts`; tests in `src/*.test.ts` (Vitest). See [AGENTS.md](./AGENTS.md) for repo conventions and gotchas.
-- Lint/format with ESLint + Prettier; verify everything with `npm run check`.
+- Source lives in `src/`; tests in `src/*.test.ts` (Vitest). See [AGENTS.md](./AGENTS.md) for repo conventions and gotchas.
+- `npm run check` runs lint, typecheck, format check, and tests in one command; `npm run build` emits the published artifact to `dist/`.
 
 ## License
 
