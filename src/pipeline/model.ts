@@ -8,7 +8,12 @@ export interface GenerateCtx {
   };
 }
 
-/** Single-shot model generation with one identical-prompt retry on AppError from `check`. */
+/**
+ * Single-shot model generation with one identical-prompt retry on AppError from `check`.
+ * No timeout: legitimate inferences can run 20–30 min and the generate API exposes no
+ * cancellation. No transport retry: OpenCode retries provider failures server-side (with
+ * backoff and a hard attempt cap); a rejection here is terminal, so re-issuing only adds cost.
+ */
 export async function generateChecked<T>(
   ctx: GenerateCtx,
   model: ModelRef,
