@@ -105,4 +105,51 @@ projects:
     const hits = await runSearch(ctx, opts, "nonexistent topic");
     expect(hits).toEqual([]);
   });
+
+  it("drills each candidate exactly once even when the model echoes paths across chunks", async () => {
+    // Force a multi-chunk stage-1 split so both TOC paths are echoed by more than
+    // one independent chunk call. Upstream dedup must collapse them so each file
+    // is drilled (and appears in the hits) exactly once — no double-drill.
+    // Entry blocks are ~102/93 bytes (path length varies with the tmp dir), summing
+    // to ~195; a 152-byte budget (tokens=200 -> floor(200*3.5*0.218)) fits one block
+    // but not both, so they split into 2 chunks. The window (max block < budget < sum)
+    // is wide enough to absorb tmp-path length variation.
+    const multiOpts: ChadOptions = { ...opts, availableContext: 200 };
+    const scanPaths = [
+      join(tmp, "projects/alpha/docs/garden.md"),
+      join(tmp, "projects/alpha/docs/cooking.md"),
+    ];
+    const prompts: string[] = [];
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async ({ prompt }) => {
+          prompts.push(prompt);
+          if (prompt.includes("table of contents extract")) {
+            // Stage 1: every chunk echoes BOTH paths as relevant.
+            return {
+              text: JSON.stringify(
+                scanPaths.map((path) => ({ path, matchReason: SCAN_REASON })),
+              ),
+            };
+          }
+          // Stage 2: drilldown — match whatever file is being read.
+          return {
+            text: JSON.stringify({ match: true, matchReason: MATCH_REASON }),
+          };
+        },
+      },
+    };
+
+    const hits = await runSearch(ctx, multiOpts, "garden soil");
+
+    // Two unique candidates -> exactly two drilldown calls (not one per chunk echo).
+    const drillCalls = prompts.filter(
+      (p) => !p.includes("table of contents extract"),
+    );
+    expect(drillCalls).toHaveLength(2);
+    // Each candidate appears in the hits exactly once.
+    expect(hits).toHaveLength(2);
+    const hitPaths = hits.map((h) => h.path).sort();
+    expect(hitPaths).toEqual([...scanPaths].sort());
+  });
 });

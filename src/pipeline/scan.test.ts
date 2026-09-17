@@ -107,4 +107,67 @@ describe("runScan", () => {
     const hits = await runScan(liarCtx, opts, "ghost");
     expect(hits).toEqual([]);
   });
+
+  it("dedupes a path the model echoes across chunk outputs (keeps first)", async () => {
+    // Force a real multi-chunk split so the same path is echoed by more than one
+    // independent chunk call; only one hit should survive, with the first reason.
+    const multiOpts: ChadOptions = { ...opts, availableContext: 300 };
+    const calls: string[] = [];
+    const dupCtx: GenerateCtx = {
+      generate: {
+        text: async ({ prompt }) => {
+          calls.push(prompt);
+          return {
+            text: JSON.stringify([
+              {
+                path: `${tmp}/projects/alpha/docs/garden.md`,
+                matchReason: REASON,
+              },
+            ]),
+          };
+        },
+      },
+    };
+    const hits = await runScan(dupCtx, multiOpts, "garden");
+    // Genuinely multiple chunks, each echoing the same path.
+    expect(calls.length).toBeGreaterThan(1);
+    expect(hits).toHaveLength(1);
+    expect(hits[0].matchReason).toBe(REASON);
+  });
+
+  it("accumulates hits across multiple chunks (one model call per chunk)", async () => {
+    // Back-solve a context small enough that the 3 entries pack into >=2 chunks.
+    // budget = floor(tokens * 3.5 * 0.218). Entry blocks are 96/64/99 bytes, so a
+    // 228-byte budget (tokens=300) fits the first two (160) but not the third.
+    const multiOpts: ChadOptions = {
+      ...opts,
+      availableContext: 300,
+    };
+    const calls: string[] = [];
+    const multiCtx: GenerateCtx = {
+      generate: {
+        text: async ({ prompt }) => {
+          calls.push(prompt);
+          // Each chunk reports the garden doc as relevant (it may appear in one
+          // chunk only, but dedup guarantees a single hit regardless).
+          return {
+            text: JSON.stringify([
+              {
+                path: `${tmp}/projects/alpha/docs/garden.md`,
+                matchReason: REASON,
+              },
+            ]),
+          };
+        },
+      },
+    };
+
+    const hits = await runScan(multiCtx, multiOpts, "garden soil");
+
+    // More than one chunk means more than one model call.
+    expect(calls.length).toBeGreaterThan(1);
+    // Deduped to a single hit despite every chunk echoing the same path.
+    expect(hits).toHaveLength(1);
+    expect(hits[0].depth).toBe("toc");
+  });
 });
