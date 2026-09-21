@@ -9,8 +9,12 @@ const VALID = {
 };
 
 describe("validateOptions", () => {
-  it("accepts a complete option set", () => {
-    expect(validateOptions(VALID)).toEqual(VALID);
+  it("accepts a complete option set and applies concurrency defaults", () => {
+    expect(validateOptions(VALID)).toEqual({
+      ...VALID,
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
+    });
   });
 
   it("rejects non-object options", () => {
@@ -47,5 +51,36 @@ describe("validateOptions", () => {
       validateOptions({ ...VALID, model: { providerID: "p" } }),
     ).toThrow(/model/);
     expect(() => validateOptions({ ...VALID, model: null })).toThrow(/model/);
+  });
+
+  it("accepts explicit inferenceConcurrency and inferenceRateLimitMs", () => {
+    const opts = validateOptions({
+      ...VALID,
+      inferenceConcurrency: 4,
+      inferenceRateLimitMs: 250,
+    });
+    expect(opts.inferenceConcurrency).toBe(4);
+    expect(opts.inferenceRateLimitMs).toBe(250);
+  });
+
+  it("rejects a non-positive-integer inferenceConcurrency", () => {
+    for (const bad of [0, -1, 1.5, "3", null]) {
+      expect(() =>
+        validateOptions({ ...VALID, inferenceConcurrency: bad }),
+      ).toThrow(/inferenceConcurrency/);
+    }
+  });
+
+  it("rejects a negative or non-integer inferenceRateLimitMs", () => {
+    for (const bad of [-1, 0.5, "fast", null]) {
+      expect(() =>
+        validateOptions({ ...VALID, inferenceRateLimitMs: bad }),
+      ).toThrow(/inferenceRateLimitMs/);
+    }
+  });
+
+  it("accepts inferenceRateLimitMs of 0 (no throttle)", () => {
+    const opts = validateOptions({ ...VALID, inferenceRateLimitMs: 0 });
+    expect(opts.inferenceRateLimitMs).toBe(0);
   });
 });

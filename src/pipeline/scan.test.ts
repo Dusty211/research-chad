@@ -43,6 +43,8 @@ describe("runScan", () => {
       baseDir: tmp,
       availableContext: 262_144, // budget ~200KB: everything fits one chunk
       model: { providerID: "p", id: "m" },
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
     };
     prompts = [];
     ctx = {

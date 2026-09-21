@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import { PipelineError } from "../errors.js";
 import { chunkBudgetBytes } from "../lib/budget.js";
 import { packEntries } from "../lib/chunk.js";
 import { parseToc } from "../lib/toc.js";
@@ -6,6 +7,11 @@ import { buildChunkPrompt } from "../lib/prompt.js";
 import { parseChunkResult } from "../lib/validate.js";
 import type { ChadOptions } from "../options.js";
 import type { TocEntry } from "../types.js";
+import {
+  attemptedCount,
+  mapWithConcurrency,
+  toFailures,
+} from "./concurrency.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
 
 /** A stage-1 relevance judgment: an entry plus the model's reason for it. */
@@ -28,7 +34,12 @@ export async function loadEntries(opts: ChadOptions): Promise<TocEntry[]> {
  * occurrence wins, chunk order preserved). The model is non-deterministic and
  * can echo the same path across chunk outputs; deduping here keeps every
  * downstream consumer (scan hits, drilldown candidates) on clean data.
- * Hard-fails on first error.
+ *
+ * Independent chunks run through the concurrency pool (opts.inferenceConcurrency
+ * / inferenceRateLimitMs). All-or-nothing: any chunk failure raises a
+ * PipelineError listing every failed chunk. Per-item outcomes are exposed so a
+ * future retry/recovery policy can re-dispatch only the failed chunks without
+ * changing the pool or loop structure.
  */
 export async function runStage1(
   ctx: GenerateCtx,
@@ -41,18 +52,36 @@ export async function runStage1(
   if (!packed.ok) throw packed.error;
 
   const byPath = new Map(entries.map((e) => [e.path, e]));
+
+  const outcomes = await mapWithConcurrency(
+    packed.value,
+    {
+      concurrency: opts.inferenceConcurrency,
+      rateLimitMs: opts.inferenceRateLimitMs,
+    },
+    (chunk) =>
+      generateChecked(
+        ctx,
+        opts.model,
+        buildChunkPrompt(query, chunk.text),
+        parseChunkResult,
+      ),
+  );
+
+  const failures = toFailures(outcomes);
+  if (failures.length > 0) {
+    throw new PipelineError(
+      failures,
+      packed.value.length,
+      attemptedCount(outcomes),
+    );
+  }
+
   const seen = new Set<string>();
   const hits: Stage1Hit[] = [];
-
-  for (const chunk of packed.value) {
-    const chunkHits = await generateChecked(
-      ctx,
-      opts.model,
-      buildChunkPrompt(query, chunk.text),
-      parseChunkResult,
-    );
-
-    for (const { path, matchReason } of chunkHits) {
+  for (const outcome of outcomes) {
+    if (!outcome || !outcome.ok) continue;
+    for (const { path, matchReason } of outcome.value) {
       const entry = byPath.get(path);
       if (!entry) continue; // model echoed a path not in the TOC; ignore
       if (seen.has(entry.path)) continue; // already judged; keep first occurrence

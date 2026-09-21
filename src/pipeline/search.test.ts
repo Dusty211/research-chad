@@ -47,6 +47,8 @@ projects:
       baseDir: tmp,
       availableContext: 262_144,
       model: { providerID: "p", id: "m" },
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
     };
   });
 

@@ -54,6 +54,8 @@ projects:
       baseDir: tmp,
       availableContext: 262_144,
       model: { providerID: "p", id: "m" },
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
     };
 
     const entries = await loadEntries(opts);
@@ -75,6 +77,8 @@ projects:
       baseDir: tmp,
       availableContext: 262_144,
       model: { providerID: "p", id: "m" },
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
     };
 
     await expect(loadEntries(opts)).rejects.toMatchObject({
@@ -88,6 +92,8 @@ projects:
       baseDir: tmp,
       availableContext: 262_144,
       model: { providerID: "p", id: "m" },
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
     };
 
     // readFile runs before parseToc, so a missing file surfaces as the raw
@@ -113,6 +119,8 @@ describe("runStage1", () => {
       baseDir: tmp,
       availableContext: 262_144, // budget ~200KB: everything fits one chunk
       model: { providerID: "p", id: "m" },
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
     };
   });
 
@@ -211,11 +219,70 @@ describe("runStage1", () => {
     });
   });
 
-  it("propagates a ModelOutputError when the model output is invalid twice", async () => {
-    // Invalid JSON fails the check on both attempts -> hard fail with code model_output.
+  it("raises a PipelineError wrapping the ModelOutputError when output is invalid twice", async () => {
+    // Invalid JSON fails the check on both attempts -> all-or-nothing PipelineError.
     const ctx = ctxReturning("this is not json");
     await expect(runStage1(ctx, opts, "q", entries)).rejects.toMatchObject({
-      code: "model_output",
+      code: "pipeline",
+      failures: [
+        { index: 0, error: expect.objectContaining({ code: "model_output" }) },
+      ],
+      total: 1,
+      attempted: 1,
     });
+  });
+
+  it("lists every failed chunk in a PipelineError and stops dispatching after the first", async () => {
+    // Force a multi-chunk split (same budget trick as the cross-chunk dedup test).
+    const multiOpts = { ...opts, availableContext: 80 };
+    let call = 0;
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async () => {
+          call++;
+          // First chunk: valid. Second chunk: invalid JSON (fails both retries).
+          return call === 1
+            ? {
+                text: JSON.stringify([
+                  { path: gardenPath, matchReason: REASON },
+                ]),
+              }
+            : { text: "not json at all" };
+        },
+      },
+    };
+
+    await expect(
+      runStage1(ctx, multiOpts, "garden", entries),
+    ).rejects.toMatchObject({
+      code: "pipeline",
+      total: 2,
+      attempted: 2,
+      failures: [
+        { index: 1, error: expect.objectContaining({ code: "model_output" }) },
+      ],
+    });
+  });
+
+  it("produces identical deduped results at inferenceConcurrency 2", async () => {
+    const parallelOpts = { ...opts, inferenceConcurrency: 2 };
+    const ctx = ctxReturning(
+      JSON.stringify([
+        { path: gardenPath, matchReason: REASON },
+        {
+          path: cookingPath,
+          matchReason: "Baking basics. On query. Relevant.",
+        },
+      ]),
+    );
+
+    const hits = await runStage1(ctx, parallelOpts, "garden", entries);
+    expect(hits).toEqual([
+      { entry: entries[0], matchReason: REASON },
+      {
+        entry: entries[1],
+        matchReason: "Baking basics. On query. Relevant.",
+      },
+    ]);
   });
 });

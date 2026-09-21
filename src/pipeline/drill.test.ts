@@ -61,6 +61,8 @@ describe("runDrill", () => {
       baseDir: tmp,
       availableContext: 262_144,
       model: { providerID: "p", id: "m" },
+      inferenceConcurrency: 1,
+      inferenceRateLimitMs: 0,
     };
   });
 
@@ -188,7 +190,7 @@ describe("runDrill", () => {
     expect(partCalls.at(-1)).toContain("So far found in earlier parts");
   });
 
-  it("hard-fails naming the path when a file is missing", async () => {
+  it("raises a PipelineError naming the path when a file is missing", async () => {
     const ctx: GenerateCtx = {
       generate: { text: async () => ({ text: "{}" }) },
     };
@@ -196,6 +198,102 @@ describe("runDrill", () => {
       runDrill(ctx, opts, "q", [
         docEntry("ghost.md", join(tmp, "projects/alpha/docs/ghost.md")),
       ]),
+    ).rejects.toMatchObject({
+      code: "pipeline",
+      total: 1,
+      attempted: 1,
+      failures: [{ index: 0, error: expect.anything() }],
+    });
+    // The ENOENT message still names the missing file.
+    await expect(
+      runDrill(ctx, opts, "q", [
+        docEntry("ghost.md", join(tmp, "projects/alpha/docs/ghost.md")),
+      ]),
     ).rejects.toThrow(/ghost\.md/);
+  });
+
+  it("lists only the failed candidate when one of several errors", async () => {
+    // The model returns a valid non-match for whatever file exists; only the
+    // missing file (ENOENT) fails.
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async () => ({
+          text: JSON.stringify({ match: false, matchReason: null }),
+        }),
+      },
+    };
+    await expect(
+      runDrill(ctx, opts, "q", [
+        docEntry("garden.md", join(tmp, "projects/alpha/docs/garden.md")),
+        docEntry("ghost.md", join(tmp, "projects/alpha/docs/ghost.md")),
+      ]),
+    ).rejects.toMatchObject({
+      code: "pipeline",
+      total: 2,
+      attempted: 2,
+      failures: [{ index: 1, error: expect.anything() }],
+    });
+  });
+
+  it("keeps matching candidates at inferenceConcurrency 2", async () => {
+    const parallelOpts = { ...opts, inferenceConcurrency: 2 };
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async ({ prompt }) => {
+          const isGarden = prompt.includes("# Garden\nsoil preparation");
+          return {
+            text: JSON.stringify(
+              isGarden
+                ? { match: true, matchReason: MATCH_REASON }
+                : { match: false, matchReason: null },
+            ),
+          };
+        },
+      },
+    };
+
+    const hits = await runDrill(ctx, parallelOpts, "garden soil", [
+      docEntry("garden.md", join(tmp, "projects/alpha/docs/garden.md")),
+      docEntry("cooking.md", join(tmp, "projects/alpha/docs/cooking.md")),
+    ]);
+
+    expect(hits).toHaveLength(1);
+    expect(hits[0].name).toBe("garden.md");
+  });
+
+  it("stops dispatching at concurrency 2 and reports attempted < total on failure", async () => {
+    // Three candidates, two slots: garden + ghost dispatch together. The
+    // missing file fails fast (ENOENT before any model call) while the garden
+    // read/model call is still in-flight, so cooking is never dispatched:
+    // attempted 2 of 3.
+    const parallelOpts = { ...opts, inferenceConcurrency: 2 };
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async () => {
+          // Hold the model call open past the fast ENOENT so the stop-dispatch
+          // decision happens while garden is still in-flight.
+          await new Promise((r) => setTimeout(r, 30));
+          return {
+            text: JSON.stringify({ match: false, matchReason: null }),
+          };
+        },
+      },
+    };
+
+    const candidates = [
+      docEntry("garden.md", join(tmp, "projects/alpha/docs/garden.md")),
+      docEntry("ghost.md", join(tmp, "projects/alpha/docs/ghost.md")),
+      docEntry("cooking.md", join(tmp, "projects/alpha/docs/cooking.md")),
+    ];
+
+    const error = await runDrill(ctx, parallelOpts, "q", candidates).catch(
+      (e) => e,
+    );
+    expect(error).toMatchObject({
+      code: "pipeline",
+      total: 3,
+      attempted: 2,
+      failures: [{ index: 1, error: expect.anything() }],
+    });
   });
 });

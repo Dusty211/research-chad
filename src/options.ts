@@ -15,6 +15,10 @@ export interface ChadOptions {
   availableContext: number;
   /** Model used for all generate calls. */
   model: ModelRef;
+  /** Max concurrent model calls. Default 1 (sequential). */
+  inferenceConcurrency: number;
+  /** Min ms between dispatching new model calls. Default 0 (no throttle). */
+  inferenceRateLimitMs: number;
 }
 
 export class OptionsError extends AppError {
@@ -59,6 +63,35 @@ export function validateOptions(raw: unknown): ChadOptions {
   ) {
     throw new OptionsError("options.model is required ({ providerID, id })");
   }
+  const inferenceConcurrency = o.inferenceConcurrency;
+  if (
+    inferenceConcurrency !== undefined &&
+    (typeof inferenceConcurrency !== "number" ||
+      !Number.isInteger(inferenceConcurrency) ||
+      inferenceConcurrency < 1)
+  ) {
+    throw new OptionsError(
+      "options.inferenceConcurrency must be a positive integer (default: 1)",
+    );
+  }
+  const inferenceRateLimitMs = o.inferenceRateLimitMs;
+  if (
+    inferenceRateLimitMs !== undefined &&
+    (typeof inferenceRateLimitMs !== "number" ||
+      !Number.isInteger(inferenceRateLimitMs) ||
+      inferenceRateLimitMs < 0)
+  ) {
+    throw new OptionsError(
+      "options.inferenceRateLimitMs must be a non-negative integer (default: 0)",
+    );
+  }
 
-  return { tocPath, baseDir, availableContext, model };
+  return {
+    tocPath,
+    baseDir,
+    availableContext,
+    model,
+    inferenceConcurrency: inferenceConcurrency ?? 1,
+    inferenceRateLimitMs: inferenceRateLimitMs ?? 0,
+  };
 }

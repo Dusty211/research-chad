@@ -9,7 +9,7 @@ Both tools take a single input:
 
 - `query` (string, required) — what you are looking for.
 
-On failure both tools return a structured error object instead of a hits array: `{ "ok": false, "error": { "code", "message" } }`. Error codes: `toc_parse`, `chunk_budget`, `model_output`, `options`, `unknown`.
+On failure both tools return a structured error object instead of a hits array: `{ "ok": false, "error": { "code", "message" } }`. Error codes: `toc_parse`, `chunk_budget`, `model_output`, `pipeline`, `options`, `unknown`. A `pipeline` error means one or more model calls failed mid-run; its message lists every failed item (position and reason) plus how many items were attempted.
 
 ## Setup
 
@@ -30,13 +30,21 @@ OpenCode installs the plugin itself — you only reference it in your config (`o
         "availableContext": 262144,
         // Model used for all generate calls.
         "model": { "providerID": "anthropic", "id": "claude-sonnet-4-5" },
+
+        // Optional: max concurrent model calls (default 1, sequential).
+        // Raise this only if your provider/backend can serve parallel
+        // inferences; set it conservatively relative to its rate limits.
+        "inferenceConcurrency": 1,
+        // Optional: min ms between dispatching new model calls (default 0,
+        // no throttle). A dispatch-spacing throttle, not a quota limiter.
+        "inferenceRateLimitMs": 0,
       },
     },
   ],
 }
 ```
 
-All four options are required. After adding or changing the config, restart the OpenCode service (`opencode service restart`) to pick it up.
+The first four options are required; `inferenceConcurrency` and `inferenceRateLimitMs` are optional (defaults shown). After adding or changing the config, restart the OpenCode service (`opencode service restart`) to pick it up.
 
 ## Errors
 

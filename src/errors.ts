@@ -3,8 +3,10 @@
  *
  * - lib/ pure functions never throw for expected conditions; they return a
  *   Result<T> whose failure side carries an AppError.
- * - pipeline/ wraps failures and propagates the first one up; tools surface
- *   it as a structured error result. v1 always fails hard, never silently.
+ * - pipeline/ runs independent items through a bounded-concurrency pool and
+ *   applies an all-or-nothing policy: any item failure raises a PipelineError
+ *   carrying every failed item. Tools surface it as a structured error result.
+ *   v1 always fails hard, never silently.
  */
 
 export type Result<T> = { ok: true; value: T } | { ok: false; error: AppError };
@@ -46,4 +48,49 @@ export class ModelOutputError extends AppError {
     super(message);
     this.raw = raw;
   }
+}
+
+/** One failed item in a pipeline run: its input position and the error it threw. */
+export interface PipelineFailure {
+  /** Zero-based input index of the failed item. */
+  index: number;
+  error: unknown;
+}
+
+/**
+ * A pipeline run failed under the all-or-nothing policy. Carries every failed
+ * item (input order) plus how many items were attempted before dispatch
+ * stopped, so the message distinguishes one bad item from a systemic failure.
+ */
+export class PipelineError extends AppError {
+  readonly code = "pipeline";
+  readonly failures: PipelineFailure[];
+  /** Total items in the batch. */
+  readonly total: number;
+  /** Items dispatched before the first failure stopped new dispatches. */
+  readonly attempted: number;
+
+  constructor(failures: PipelineFailure[], total: number, attempted: number) {
+    super(formatPipelineError(failures, total, attempted));
+    this.failures = failures;
+    this.total = total;
+    this.attempted = attempted;
+  }
+}
+
+function formatPipelineError(
+  failures: PipelineFailure[],
+  total: number,
+  attempted: number,
+): string {
+  const lines = failures.map(
+    (f) =>
+      `  [${f.index + 1}/${total}] ${
+        f.error instanceof Error ? f.error.message : String(f.error)
+      }`,
+  );
+  return [
+    `Pipeline failed: ${failures.length} of ${total} items errored (${attempted} attempted).`,
+    ...lines,
+  ].join("\n");
 }

@@ -5,7 +5,8 @@ import { loadEntries, runStage1 } from "./stage1.js";
 
 /**
  * Stage 1 as a tool: parse the TOC and scan it for entries relevant to the
- * query. Returns hits at depth "toc". Hard-fails on first error.
+ * query. Returns hits at depth "toc". All-or-nothing: any chunk failure raises
+ * a PipelineError listing every failed chunk.
  */
 export async function runScan(
   ctx: GenerateCtx,

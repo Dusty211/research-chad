@@ -7,7 +7,8 @@ import { loadEntries, runStage1 } from "./stage1.js";
 /**
  * Full pipeline: stage-1 scan over TOC chunks, then stage-2 drilldown of every
  * candidate. Returns the drilldown hits (depth "drilldown"); candidates that
- * do not match are dropped. Hard-fails on first error.
+ * do not match are dropped. All-or-nothing at each stage: any failure raises a
+ * PipelineError listing every failed item.
  */
 export async function runSearch(
   ctx: GenerateCtx,
