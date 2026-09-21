@@ -13,7 +13,7 @@ describe("PipelineError", () => {
     const e = new PipelineError(
       [
         { index: 1, error: new Error("second fails") },
-        { index: 4, error: "raw string failure" },
+        { index: 4, error: new Error("raw string failure") },
       ],
       6,
       5,
@@ -24,6 +24,13 @@ describe("PipelineError", () => {
         "  [2/6] second fails",
         "  [5/6] raw string failure",
       ].join("\n"),
+    );
+  });
+
+  it("renders only the header when there are zero failures", () => {
+    const e = new PipelineError([], 0, 0);
+    expect(e.message).toBe(
+      "Pipeline failed: 0 of 0 items errored (0 attempted).",
     );
   });
 

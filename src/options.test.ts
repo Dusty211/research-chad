@@ -1,5 +1,9 @@
 import { describe, it, expect } from "vitest";
-import { validateOptions, OptionsError } from "./options.js";
+import {
+  MAX_INFERENCE_CONCURRENCY,
+  validateOptions,
+  OptionsError,
+} from "./options.js";
 
 const VALID = {
   tocPath: "/data/TOC.yaml",
@@ -69,6 +73,21 @@ describe("validateOptions", () => {
         validateOptions({ ...VALID, inferenceConcurrency: bad }),
       ).toThrow(/inferenceConcurrency/);
     }
+  });
+
+  it("accepts inferenceConcurrency at the hard cap and rejects above it", () => {
+    const opts = validateOptions({
+      ...VALID,
+      inferenceConcurrency: MAX_INFERENCE_CONCURRENCY,
+    });
+    expect(opts.inferenceConcurrency).toBe(MAX_INFERENCE_CONCURRENCY);
+
+    expect(() =>
+      validateOptions({
+        ...VALID,
+        inferenceConcurrency: MAX_INFERENCE_CONCURRENCY + 1,
+      }),
+    ).toThrow(new RegExp(`inferenceConcurrency.*${MAX_INFERENCE_CONCURRENCY}`));
   });
 
   it("rejects a negative or non-integer inferenceRateLimitMs", () => {

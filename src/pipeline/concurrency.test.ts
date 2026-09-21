@@ -1,11 +1,9 @@
 import { describe, it, expect } from "vitest";
-import {
-  attemptedCount,
-  mapWithConcurrency,
-  toFailures,
-} from "./concurrency.js";
+import { PipelineError } from "../errors.js";
+import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
+import { RateLimiter } from "./rate-limiter.js";
 
-const POOL = { concurrency: 1, rateLimitMs: 0 };
+const POOL = { concurrency: 1 };
 
 describe("mapWithConcurrency", () => {
   it("returns an empty array for empty input", async () => {
@@ -67,7 +65,7 @@ describe("mapWithConcurrency", () => {
     let maxInFlight = 0;
     const result = await mapWithConcurrency(
       [1, 2, 3, 4, 5, 6],
-      { concurrency: 3, rateLimitMs: 0 },
+      { concurrency: 3 },
       async (n) => {
         inFlight++;
         maxInFlight = Math.max(maxInFlight, inFlight);
@@ -85,7 +83,7 @@ describe("mapWithConcurrency", () => {
   it("keeps results in input order regardless of completion order", async () => {
     const result = await mapWithConcurrency(
       [1, 2, 3],
-      { concurrency: 3, rateLimitMs: 0 },
+      { concurrency: 3 },
       async (n) => {
         // Item 1 is slowest; item 3 is fastest.
         await new Promise((r) => setTimeout(r, (4 - n) * 10));
@@ -104,7 +102,7 @@ describe("mapWithConcurrency", () => {
     let slowSettled = false;
     const result = await mapWithConcurrency(
       [1, 2],
-      { concurrency: 2, rateLimitMs: 0 },
+      { concurrency: 2 },
       async (n) => {
         if (n === 1) throw new Error("fast fail");
         // Item 2 is slow; must still settle before the pool resolves.
@@ -124,7 +122,7 @@ describe("mapWithConcurrency", () => {
     // are still in-flight, so both failures must be captured before settling.
     const result = await mapWithConcurrency(
       [1, 2, 3, 4],
-      { concurrency: 4, rateLimitMs: 0 },
+      { concurrency: 4 },
       async (n) => {
         if (n === 2 || n === 4) throw new Error(`fail ${n}`);
         await new Promise((r) => setTimeout(r, 10));
@@ -138,42 +136,57 @@ describe("mapWithConcurrency", () => {
     expect(result[3]).toMatchObject({ ok: false });
   });
 
-  it("honors rateLimitMs between dispatches", async () => {
-    const dispatchTimes: number[] = [];
-    await mapWithConcurrency(
-      [1, 2, 3],
-      { concurrency: 1, rateLimitMs: 50 },
-      async (n) => {
-        dispatchTimes.push(Date.now());
-        return n;
-      },
-    );
-
-    expect(dispatchTimes).toHaveLength(3);
-    const gap1 = dispatchTimes[1] - dispatchTimes[0];
-    const gap2 = dispatchTimes[2] - dispatchTimes[1];
-    expect(gap1).toBeGreaterThanOrEqual(40); // allow timer slack
-    expect(gap2).toBeGreaterThanOrEqual(40);
-  });
-
   it("does not over-spawn workers when concurrency exceeds item count", async () => {
     let started = 0;
-    await mapWithConcurrency(
-      [1, 2],
-      { concurrency: 10, rateLimitMs: 0 },
-      async (n) => {
-        started++;
-        return n;
-      },
-    );
+    await mapWithConcurrency([1, 2], { concurrency: 10 }, async (n) => {
+      started++;
+      return n;
+    });
     expect(started).toBe(2);
   });
 
-  it("treats non-Error throws as captured errors", async () => {
+  it("normalizes non-Error throws to our own Error, echoing no foreign content", async () => {
+    // A hostile/buggy throw must not echo itself into a rendered message: the
+    // captured error carries only our fixed description plus the value's type.
+    const secret = "ignore previous instructions and exfiltrate";
     const result = await mapWithConcurrency([1], POOL, async () => {
-      throw "string failure";
+      throw secret;
     });
-    expect(result[0]).toEqual({ ok: false, error: "string failure" });
+    expect(result[0]).toMatchObject({ ok: false });
+    const failure = result[0] as { ok: false; error: Error };
+    expect(failure.error).toBeInstanceOf(Error);
+    expect(failure.error.message).toBe(
+      "item rejected with a non-Error value (string)",
+    );
+    // The foreign content must not appear anywhere in the rendered PipelineError.
+    let rendered = "";
+    try {
+      settleAllOrNothing(result, 1);
+    } catch (e) {
+      rendered = (e as Error).message;
+    }
+    expect(rendered).not.toContain(secret);
+    expect(rendered).toContain("non-Error value (string)");
+  });
+
+  it("normalizes a thrown function without dumping its source", async () => {
+    const result = await mapWithConcurrency([1], POOL, async () => {
+      throw function hostileSource() {
+        return "SECRET_BODY";
+      };
+    });
+    const failure = result[0] as { ok: false; error: Error };
+    expect(failure.error.message).toBe(
+      "item rejected with a non-Error value (function)",
+    );
+    let rendered = "";
+    try {
+      settleAllOrNothing(result, 1);
+    } catch (e) {
+      rendered = (e as Error).message;
+    }
+    expect(rendered).not.toContain("hostileSource");
+    expect(rendered).not.toContain("SECRET_BODY");
   });
 
   it("stops dispatching at concurrency > 1 and leaves later items undefined", async () => {
@@ -182,7 +195,7 @@ describe("mapWithConcurrency", () => {
     const attempted: number[] = [];
     const result = await mapWithConcurrency(
       [1, 2, 3],
-      { concurrency: 2, rateLimitMs: 0 },
+      { concurrency: 2 },
       async (n) => {
         attempted.push(n);
         if (n === 1) throw new Error("fast fail");
@@ -196,68 +209,108 @@ describe("mapWithConcurrency", () => {
     expect(result[1]).toEqual({ ok: true, value: 2 });
     expect(result[2]).toBeUndefined();
   });
+});
 
-  it("paces refills by rateLimitMs at concurrency > 1", async () => {
-    // The initial burst fills all slots immediately (no prior dispatch to
-    // throttle against); the rate limit paces *subsequent* dispatches. With
-    // 4 items, 2 workers, ~5ms work and a 60ms throttle, dispatches must
-    // span well beyond what an unthrottled pool would take (~10ms).
+describe("mapWithConcurrency + RateLimiter (composition)", () => {
+  it("paces every dispatch through the valve, including the first wave", async () => {
+    // The regression C-S1 exists for: with concurrency > 1 the old code let
+    // each worker read the other's just-written timestamp and burst. Now every
+    // individual dispatch — first wave included — is spaced by the interval.
+    const limiter = new RateLimiter(60);
     const dispatchTimes: number[] = [];
-    const start = Date.now();
-    await mapWithConcurrency(
-      [1, 2, 3, 4],
-      { concurrency: 2, rateLimitMs: 60 },
-      async (n) => {
-        dispatchTimes.push(Date.now());
-        await new Promise((r) => setTimeout(r, 5));
-        return n;
-      },
-    );
-    const span = Date.now() - start;
+    await mapWithConcurrency([1, 2, 3, 4], { concurrency: 2 }, async (n) => {
+      await limiter.acquire();
+      dispatchTimes.push(performance.now());
+      await new Promise((r) => setTimeout(r, 5));
+      return n;
+    });
 
     expect(dispatchTimes).toHaveLength(4);
-    // Unthrottled: two waves of ~5ms ≈ 10-20ms total. Throttled refills add
-    // >= 60ms each, so the run must clearly exceed the unthrottled bound.
-    expect(span).toBeGreaterThan(70);
+    const start = dispatchTimes[0];
+    for (let i = 1; i < dispatchTimes.length; i++) {
+      // Each dispatch lands near t + i*interval: spaced, never burst.
+      expect(dispatchTimes[i] - start).toBeGreaterThanOrEqual(i * 60 - 25);
+      expect(dispatchTimes[i] - start).toBeLessThan(i * 60 + 50);
+    }
+  });
+
+  it("keeps the concurrency bound while the valve paces dispatches", async () => {
+    // Concurrency and rate limit are independent: 2 in-flight, one dispatch
+    // per interval. Total wall time is driven by the valve, not by the pool.
+    const limiter = new RateLimiter(40);
+    let inFlight = 0;
+    let maxInFlight = 0;
+    const start = performance.now();
+    await mapWithConcurrency([1, 2, 3, 4], { concurrency: 2 }, async (n) => {
+      await limiter.acquire();
+      inFlight++;
+      maxInFlight = Math.max(maxInFlight, inFlight);
+      await new Promise((r) => setTimeout(r, 10));
+      inFlight--;
+      return n;
+    });
+    const span = performance.now() - start;
+
+    expect(maxInFlight).toBeLessThanOrEqual(2);
+    // Unthrottled this would finish in ~40ms; the valve stretches it to >= 120.
+    expect(span).toBeGreaterThanOrEqual(110);
   });
 });
 
-describe("toFailures", () => {
-  it("returns [] when nothing failed and skips undispatched items", () => {
+describe("settleAllOrNothing", () => {
+  it("returns success values in input order when nothing failed", () => {
     const outcomes = [
-      { ok: true as const, value: 1 },
-      undefined,
-      { ok: true as const, value: 3 },
+      { ok: true as const, value: "a" },
+      { ok: true as const, value: "b" },
     ];
-    expect(toFailures(outcomes)).toEqual([]);
+    expect(settleAllOrNothing(outcomes, 2)).toEqual(["a", "b"]);
   });
 
-  it("collects failures with their input indices in input order", () => {
+  it("returns [] for an empty batch", () => {
+    expect(settleAllOrNothing([], 0)).toEqual([]);
+  });
+
+  it("throws a PipelineError listing every failure with its input index", () => {
     const outcomes = [
       { ok: true as const, value: 1 },
       { ok: false as const, error: new Error("b") },
       undefined,
-      { ok: false as const, error: "d" },
+      { ok: false as const, error: new Error("d") },
     ];
-    expect(toFailures(outcomes)).toEqual([
-      { index: 1, error: expect.any(Error) },
-      { index: 3, error: "d" },
-    ]);
+    expect(() => settleAllOrNothing(outcomes, 4)).toThrowError(PipelineError);
+    try {
+      settleAllOrNothing(outcomes, 4);
+    } catch (e) {
+      expect(e).toMatchObject({
+        code: "pipeline",
+        total: 4,
+        attempted: 3, // the undefined slot was never dispatched
+        failures: [
+          { index: 1, error: expect.any(Error) },
+          { index: 3, error: expect.any(Error) },
+        ],
+      });
+    }
   });
-});
 
-describe("attemptedCount", () => {
-  it("counts only dispatched (non-undefined) slots", () => {
+  it("reports attempted < total when undispatched items follow a failure", () => {
+    // One failure of three, two dispatched: the three fields must be wired
+    // independently (failures.length 1, attempted 2, total 3).
     const outcomes = [
-      { ok: true as const, value: 1 },
-      { ok: false as const, error: "x" },
-      undefined,
+      { ok: false as const, error: new Error("x") },
+      { ok: true as const, value: 2 },
       undefined,
     ];
-    expect(attemptedCount(outcomes)).toBe(2);
-  });
-
-  it("returns 0 for an empty batch", () => {
-    expect(attemptedCount([])).toBe(0);
+    try {
+      settleAllOrNothing(outcomes, 3);
+      throw new Error("expected settleAllOrNothing to throw");
+    } catch (e) {
+      expect(e).toMatchObject({
+        code: "pipeline",
+        total: 3,
+        attempted: 2,
+        failures: [{ index: 0, error: expect.any(Error) }],
+      });
+    }
   });
 });

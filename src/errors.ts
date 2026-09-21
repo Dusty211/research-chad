@@ -54,7 +54,8 @@ export class ModelOutputError extends AppError {
 export interface PipelineFailure {
   /** Zero-based input index of the failed item. */
   index: number;
-  error: unknown;
+  /** Always an Error — non-Error rejections are normalized at the pool boundary. */
+  error: Error;
 }
 
 /**
@@ -84,10 +85,7 @@ function formatPipelineError(
   attempted: number,
 ): string {
   const lines = failures.map(
-    (f) =>
-      `  [${f.index + 1}/${total}] ${
-        f.error instanceof Error ? f.error.message : String(f.error)
-      }`,
+    (f) => `  [${f.index + 1}/${total}] ${f.error.message}`,
   );
   return [
     `Pipeline failed: ${failures.length} of ${total} items errored (${attempted} attempted).`,

@@ -22,6 +22,12 @@ type ToolEditor = {
 
 type PluginCtx = {
   options: unknown;
+  generate?: {
+    text(input: {
+      model: { providerID: string; id: string };
+      prompt: string;
+    }): Promise<{ text: string }>;
+  };
   tool: {
     transform(
       callback: (editor: ToolEditor) => void,
@@ -39,6 +45,11 @@ function makeOptions(tocPath: string): unknown {
   };
 }
 
+/** A GenerateCtx whose model always returns the given text. */
+function fakeModel(text: string): PluginCtx["generate"] {
+  return { text: async () => ({ text }) };
+}
+
 /**
  * Load the plugin against a mock context and return its registered tools.
  * The double cast is deliberate: Plugin.define() returns an opaque type whose
@@ -51,7 +62,10 @@ function makeOptions(tocPath: string): unknown {
  * mirroring that rebuild step. Forgetting this replay is how you end up with
  * an empty tool map and no error.
  */
-function loadPlugin(options: unknown): Map<string, CapturedTool> {
+function loadPlugin(
+  options: unknown,
+  modelText = "[]", // default: no relevant entries
+): Map<string, CapturedTool> {
   const tools = new Map<string, CapturedTool>();
   let captured: ((editor: ToolEditor) => void) | undefined;
   const editor: ToolEditor = {
@@ -66,6 +80,7 @@ function loadPlugin(options: unknown): Map<string, CapturedTool> {
   };
   const ctx: PluginCtx = {
     options,
+    generate: fakeModel(modelText),
     tool: {
       transform: async (callback) => {
         captured = callback;
@@ -82,11 +97,19 @@ function loadPlugin(options: unknown): Map<string, CapturedTool> {
 describe("research-chad plugin", () => {
   let tmp: string;
   let tocPath: string;
+  /** A TOC with one entry so a stage-1 chunk call actually happens. */
+  let tocWithEntryPath: string;
 
   beforeAll(async () => {
     tmp = await mkdtemp(join(tmpdir(), "research-chad-test-"));
     tocPath = join(tmp, "TOC.yaml");
     await writeFile(tocPath, "projects: []\n", "utf8");
+    tocWithEntryPath = join(tmp, "TOC-entry.yaml");
+    await writeFile(
+      tocWithEntryPath,
+      `projects:\n  - dir: projects/alpha\n    docs:\n      - name: garden.md\n        summary: [Garden notes]\n`,
+      "utf8",
+    );
   });
 
   afterAll(async () => {
@@ -119,6 +142,35 @@ describe("research-chad plugin", () => {
     };
     expect(parsed.ok).toBe(false);
     expect(parsed.error.code).toBe("toc_parse");
+  });
+
+  it("toc_scan surfaces a PipelineError as code 'pipeline' at the tool boundary", async () => {
+    // The model returns invalid JSON; generateChecked retries once with the
+    // identical prompt and fails again — the standard path to a ModelOutputError,
+    // which the pool wraps in a PipelineError. This pins that the documented
+    // top-level code "pipeline" actually reaches the tool result.
+    const tools = loadPlugin(makeOptions(tocWithEntryPath), "this is not json");
+    const result = await tools.get("toc_scan")!.execute({ query: "garden" });
+    const parsed = JSON.parse(result.content) as {
+      ok: boolean;
+      error: { code: string; message: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("pipeline");
+    expect(parsed.error.message).toContain("Pipeline failed: 1 of 1");
+  });
+
+  it("toc_search surfaces a PipelineError as code 'pipeline' at the tool boundary", async () => {
+    // Same standard failure path, through the search tool (stage-1 chunk call
+    // returns invalid JSON twice -> ModelOutputError -> PipelineError).
+    const tools = loadPlugin(makeOptions(tocWithEntryPath), "this is not json");
+    const result = await tools.get("toc_search")!.execute({ query: "garden" });
+    const parsed = JSON.parse(result.content) as {
+      ok: boolean;
+      error: { code: string };
+    };
+    expect(parsed.ok).toBe(false);
+    expect(parsed.error.code).toBe("pipeline");
   });
 
   it("registers hard-error tools when options are invalid", async () => {

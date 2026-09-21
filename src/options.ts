@@ -5,7 +5,11 @@ export interface ModelRef {
   id: string;
 }
 
-/** Plugin options, read from the object form in opencode.jsonc. */
+/**
+ * Validated plugin options — the output of validateOptions, not the raw
+ * opencode.jsonc config: the two inference knobs are optional in raw config
+ * and always present here (defaults applied).
+ */
 export interface ChadOptions {
   /** Absolute path to TOC.yaml. */
   tocPath: string;
@@ -24,6 +28,9 @@ export interface ChadOptions {
 export class OptionsError extends AppError {
   readonly code = "options";
 }
+
+/** Hard ceiling on inferenceConcurrency (see validateOptions). */
+export const MAX_INFERENCE_CONCURRENCY = 10;
 
 /** Validate raw ctx.options (typed unknown by the plugin API) into ChadOptions. */
 export function validateOptions(raw: unknown): ChadOptions {
@@ -63,15 +70,19 @@ export function validateOptions(raw: unknown): ChadOptions {
   ) {
     throw new OptionsError("options.model is required ({ providerID, id })");
   }
+  // Hard cap: in-flight calls are bounded by batch size anyway, so values far
+  // above it only decide how fast an entire batch can fire at once — a cost and
+  // rate-limit amplifier with no throughput benefit.
   const inferenceConcurrency = o.inferenceConcurrency;
   if (
     inferenceConcurrency !== undefined &&
     (typeof inferenceConcurrency !== "number" ||
       !Number.isInteger(inferenceConcurrency) ||
-      inferenceConcurrency < 1)
+      inferenceConcurrency < 1 ||
+      inferenceConcurrency > MAX_INFERENCE_CONCURRENCY)
   ) {
     throw new OptionsError(
-      "options.inferenceConcurrency must be a positive integer (default: 1)",
+      `options.inferenceConcurrency must be an integer between 1 and ${MAX_INFERENCE_CONCURRENCY} (default: 1)`,
     );
   }
   const inferenceRateLimitMs = o.inferenceRateLimitMs;

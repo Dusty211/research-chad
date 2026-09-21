@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { PipelineError } from "../errors.js";
 import { chunkBudgetBytes } from "../lib/budget.js";
 import { packEntries } from "../lib/chunk.js";
 import { parseToc } from "../lib/toc.js";
@@ -7,12 +6,9 @@ import { buildChunkPrompt } from "../lib/prompt.js";
 import { parseChunkResult } from "../lib/validate.js";
 import type { ChadOptions } from "../options.js";
 import type { TocEntry } from "../types.js";
-import {
-  attemptedCount,
-  mapWithConcurrency,
-  toFailures,
-} from "./concurrency.js";
+import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
+import { RateLimiter } from "./rate-limiter.js";
 
 /** A stage-1 relevance judgment: an entry plus the model's reason for it. */
 export interface Stage1Hit {
@@ -35,11 +31,12 @@ export async function loadEntries(opts: ChadOptions): Promise<TocEntry[]> {
  * can echo the same path across chunk outputs; deduping here keeps every
  * downstream consumer (scan hits, drilldown candidates) on clean data.
  *
- * Independent chunks run through the concurrency pool (opts.inferenceConcurrency
- * / inferenceRateLimitMs). All-or-nothing: any chunk failure raises a
- * PipelineError listing every failed chunk. Per-item outcomes are exposed so a
- * future retry/recovery policy can re-dispatch only the failed chunks without
- * changing the pool or loop structure.
+ * Independent chunks run through the concurrency pool (opts.inferenceConcurrency);
+ * every dispatch additionally passes through the rate-limit valve
+ * (opts.inferenceRateLimitMs) — the two are separate concerns composed here, so
+ * no chunk is ever sent outside the app faster than the valve allows.
+ * All-or-nothing: any chunk failure raises a PipelineError listing every
+ * failed chunk (settleAllOrNothing is the single home of that policy).
  */
 export async function runStage1(
   ctx: GenerateCtx,
@@ -53,35 +50,35 @@ export async function runStage1(
 
   const byPath = new Map(entries.map((e) => [e.path, e]));
 
+  // The valve paces every individual dispatch; the pool bounds how many are
+  // in-flight. Composed here so neither concern knows about the other.
+  const limiter =
+    opts.inferenceRateLimitMs > 0
+      ? new RateLimiter(opts.inferenceRateLimitMs)
+      : null;
+
   const outcomes = await mapWithConcurrency(
     packed.value,
-    {
-      concurrency: opts.inferenceConcurrency,
-      rateLimitMs: opts.inferenceRateLimitMs,
-    },
-    (chunk) =>
-      generateChecked(
+    { concurrency: opts.inferenceConcurrency },
+    async (chunk) => {
+      if (limiter) await limiter.acquire();
+      return generateChecked(
         ctx,
         opts.model,
         buildChunkPrompt(query, chunk.text),
         parseChunkResult,
-      ),
+      );
+    },
   );
 
-  const failures = toFailures(outcomes);
-  if (failures.length > 0) {
-    throw new PipelineError(
-      failures,
-      packed.value.length,
-      attemptedCount(outcomes),
-    );
-  }
+  // Past this point every outcome is a success; undefined means the item was
+  // never dispatched, which cannot happen once settlement passed.
+  const values = settleAllOrNothing(outcomes, packed.value.length);
 
   const seen = new Set<string>();
   const hits: Stage1Hit[] = [];
-  for (const outcome of outcomes) {
-    if (!outcome || !outcome.ok) continue;
-    for (const { path, matchReason } of outcome.value) {
+  for (const value of values) {
+    for (const { path, matchReason } of value) {
       const entry = byPath.get(path);
       if (!entry) continue; // model echoed a path not in the TOC; ignore
       if (seen.has(entry.path)) continue; // already judged; keep first occurrence

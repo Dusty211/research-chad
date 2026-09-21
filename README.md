@@ -9,7 +9,7 @@ Both tools take a single input:
 
 - `query` (string, required) — what you are looking for.
 
-On failure both tools return a structured error object instead of a hits array: `{ "ok": false, "error": { "code", "message" } }`. Error codes: `toc_parse`, `chunk_budget`, `model_output`, `pipeline`, `options`, `unknown`. A `pipeline` error means one or more model calls failed mid-run; its message lists every failed item (position and reason) plus how many items were attempted.
+On failure both tools return a structured error object instead of a hits array: `{ "ok": false, "error": { "code", "message" } }`. Error codes: `toc_parse`, `chunk_budget`, `model_output`, `pipeline`, `options`, `unknown`. A `pipeline` error means one or more items (TOC chunks or drill candidates) failed mid-run; its message lists every failed item (position and reason) plus how many items were attempted. Failed model calls and missing candidate files always surface wrapped in `pipeline` — the specific cause appears in the message, so `model_output` never reaches you as a top-level tool code for those cases.
 
 ## Setup
 
@@ -31,12 +31,15 @@ OpenCode installs the plugin itself — you only reference it in your config (`o
         // Model used for all generate calls.
         "model": { "providerID": "anthropic", "id": "claude-sonnet-4-5" },
 
-        // Optional: max concurrent model calls (default 1, sequential).
-        // Raise this only if your provider/backend can serve parallel
-        // inferences; set it conservatively relative to its rate limits.
+        // Optional: max concurrent model calls (default 1, sequential, hard
+        // cap 10). Raise this only if your provider/backend can serve
+        // parallel inferences; set it conservatively relative to its rate
+        // limits. In-flight calls are bounded by the batch size anyway, so
+        // values above the cap buy nothing.
         "inferenceConcurrency": 1,
         // Optional: min ms between dispatching new model calls (default 0,
-        // no throttle). A dispatch-spacing throttle, not a quota limiter.
+        // no throttle). Applies to every individual call — including the first
+        // batch of concurrent ones. A dispatch-spacing valve, not a quota limiter.
         "inferenceRateLimitMs": 0,
       },
     },

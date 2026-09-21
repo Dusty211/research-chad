@@ -1,5 +1,4 @@
 import { readFile } from "node:fs/promises";
-import { PipelineError } from "../errors.js";
 import { chunkBudgetBytes } from "../lib/budget.js";
 import { sliceFile } from "../lib/chunk.js";
 import {
@@ -14,12 +13,9 @@ import {
 } from "../lib/validate.js";
 import type { ChadOptions } from "../options.js";
 import type { Hit, TocEntry } from "../types.js";
-import {
-  attemptedCount,
-  mapWithConcurrency,
-  toFailures,
-} from "./concurrency.js";
+import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
+import { RateLimiter } from "./rate-limiter.js";
 
 /**
  * Stage 2: for each candidate entry, read its file and judge relevance.
@@ -27,13 +23,14 @@ import { generateChecked, type GenerateCtx } from "./model.js";
  * Files within budget get one call; larger files run the left-to-right
  * overflow fold. Returns hits at depth "drilldown".
  *
- * Independent candidates run through the concurrency pool (opts.inferenceConcurrency
- * / inferenceRateLimitMs). All-or-nothing: any candidate failure raises a
- * PipelineError listing every failed candidate. The overflow fold within a
- * single candidate stays sequential — it threads a running distill forward,
- * a true dependency chain, not parallelizable work. Per-item outcomes are
- * exposed so a future retry/recovery policy can re-dispatch only the failed
- * candidates without changing the pool or loop structure.
+ * Independent candidates run through the concurrency pool (opts.inferenceConcurrency);
+ * every dispatch additionally passes through the rate-limit valve
+ * (opts.inferenceRateLimitMs) — the two are separate concerns composed here, so
+ * no candidate is ever sent outside the app faster than the valve allows.
+ * All-or-nothing: any candidate failure raises a PipelineError listing every
+ * failed candidate (settleAllOrNothing is the single home of that policy).
+ * The overflow fold within a single candidate stays sequential — it threads a
+ * running distill forward, a true dependency chain, not parallelizable work.
  */
 export async function runDrill(
   ctx: GenerateCtx,
@@ -43,28 +40,29 @@ export async function runDrill(
 ): Promise<Hit[]> {
   const maxBytes = chunkBudgetBytes(opts.availableContext);
 
+  // The valve paces every individual dispatch; the pool bounds how many are
+  // in-flight. Composed here so neither concern knows about the other.
+  const limiter =
+    opts.inferenceRateLimitMs > 0
+      ? new RateLimiter(opts.inferenceRateLimitMs)
+      : null;
+
   const outcomes = await mapWithConcurrency(
     candidates,
-    {
-      concurrency: opts.inferenceConcurrency,
-      rateLimitMs: opts.inferenceRateLimitMs,
+    { concurrency: opts.inferenceConcurrency },
+    async (entry) => {
+      if (limiter) await limiter.acquire();
+      return drillOne(ctx, opts, query, entry, maxBytes);
     },
-    (entry) => drillOne(ctx, opts, query, entry, maxBytes),
   );
 
-  const failures = toFailures(outcomes);
-  if (failures.length > 0) {
-    throw new PipelineError(
-      failures,
-      candidates.length,
-      attemptedCount(outcomes),
-    );
-  }
+  // Past this point every value is a settled Hit | null; undefined (never
+  // dispatched) cannot survive settlement.
+  const values = settleAllOrNothing(outcomes, candidates.length);
 
   const hits: Hit[] = [];
-  for (const outcome of outcomes) {
-    if (!outcome || !outcome.ok) continue;
-    if (outcome.value !== null) hits.push(outcome.value);
+  for (const value of values) {
+    if (value !== null) hits.push(value);
   }
   return hits;
 }

@@ -285,4 +285,40 @@ describe("runStage1", () => {
       },
     ]);
   });
+
+  it("paces dispatches through the rate-limit valve when inferenceRateLimitMs > 0", async () => {
+    // Force a 2-chunk split (same budget trick as the cross-chunk dedup test)
+    // and turn the throttle on. This pins the wiring: a typo that passed
+    // inferenceConcurrency as the interval (or vice versa) would either break
+    // the run or fail to space dispatches, and this test catches both.
+    const multiOpts = {
+      ...opts,
+      availableContext: 80,
+      inferenceRateLimitMs: 60,
+    };
+    const dispatchTimes: number[] = [];
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async () => {
+          dispatchTimes.push(performance.now());
+          return {
+            text: JSON.stringify([{ path: gardenPath, matchReason: REASON }]),
+          };
+        },
+      },
+    };
+
+    const hits = await runStage1(ctx, multiOpts, "garden", entries);
+
+    // The split actually produced multiple independent chunk calls.
+    expect(dispatchTimes.length).toBeGreaterThan(1);
+    // Results are still correct under the throttle.
+    expect(hits).toHaveLength(1);
+    expect(hits[0].entry.path).toBe(gardenPath);
+    // Every dispatch — including the first — is spaced by >= the interval.
+    const start = dispatchTimes[0];
+    for (let i = 1; i < dispatchTimes.length; i++) {
+      expect(dispatchTimes[i] - start).toBeGreaterThanOrEqual(i * 60 - 25);
+    }
+  });
 });

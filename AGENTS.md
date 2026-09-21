@@ -6,6 +6,7 @@
 - Never perform any operation with Git which modifies the git state or the data on disk.
 
 ## Design priorities
+
 - You must strictly prioritize code quality over convenience. Never take the "easy way out" because doing it properly is "too much work" or would "take too long."
 - You must strictly use idiomatic JS/TS patterns and conventions.
 - You must always default to fundemental software engineering principles.
