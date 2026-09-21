@@ -38,6 +38,13 @@ function describe(validator: ValidateFunction): string {
   return `model output failed schema validation: ${details ?? "unknown"}`;
 }
 
+/** Enforced floor for matchReason shape (see hasSentenceShape). */
+const MIN_SENTENCE_BOUNDARIES = 2;
+const MIN_REASON_LENGTH = 20;
+
+/** The single message describing the enforced matchReason floor. */
+const REASON_SHAPE_MESSAGE = `matchReason must contain at least ${MIN_SENTENCE_BOUNDARIES} sentence boundaries (period + space) and be at least ${MIN_REASON_LENGTH} characters`;
+
 export interface ChunkHit {
   path: string;
   matchReason: string;
@@ -52,12 +59,7 @@ export function parseChunkResult(raw: string): Result<ChunkHit[]> {
   }
   for (const hit of parsed.value as ChunkHit[]) {
     if (!hasSentenceShape(hit.matchReason)) {
-      return err(
-        new ModelOutputError(
-          "matchReason must contain at least two sentence boundaries (period + space) and be at least 20 characters",
-          raw,
-        ),
-      );
+      return err(new ModelOutputError(REASON_SHAPE_MESSAGE, raw));
     }
   }
   return ok(parsed.value as ChunkHit[]);
@@ -89,12 +91,7 @@ export function parseDrillResult(raw: string): Result<DrillResult> {
   }
   const value = parsed.value as DrillResult;
   if (value.match && !hasSentenceShape(value.matchReason ?? "")) {
-    return err(
-      new ModelOutputError(
-        "matchReason must contain at least two sentence boundaries (period + space) and be at least 20 characters",
-        raw,
-      ),
-    );
+    return err(new ModelOutputError(REASON_SHAPE_MESSAGE, raw));
   }
   return ok(value);
 }
@@ -104,7 +101,7 @@ export function parseDrillResult(raw: string): Result<DrillResult> {
 function hasSentenceShape(text: string): boolean {
   const t = text.trim();
   const boundaries = t.match(/\.{1,2} {1,2}/g)?.length ?? 0;
-  return boundaries >= 2 && t.length >= 20;
+  return boundaries >= MIN_SENTENCE_BOUNDARIES && t.length >= MIN_REASON_LENGTH;
 }
 
 /** A validated stage-2 result promoted to a Hit. */

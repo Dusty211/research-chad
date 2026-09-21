@@ -48,7 +48,7 @@ export interface Hit {
   kind: EntryKind;
   /** Which stage produced this hit. */
   depth: "toc" | "drilldown";
-  /** Exactly 3 sentences: what this entry contains that pertains to the query, citing specific details. */
+  /** A short multi-sentence reason (3-sentence ideal) for what this entry contains that pertains to the query, citing specific details. Validated to a shape floor only — see hasSentenceShape in validate.ts. */
   matchReason: string;
 }
 

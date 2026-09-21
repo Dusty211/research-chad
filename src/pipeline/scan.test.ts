@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { REFERENCE_AVAILABLE_CONTEXT } from "../lib/budget.js";
 import { runScan } from "./scan.js";
 import type { GenerateCtx } from "./model.js";
 import type { ChadOptions } from "../options.js";
@@ -41,7 +42,7 @@ describe("runScan", () => {
     opts = {
       tocPath,
       baseDir: tmp,
-      availableContext: 262_144, // budget ~200KB: everything fits one chunk
+      availableContext: REFERENCE_AVAILABLE_CONTEXT, // budget ~200KB: everything fits one chunk
       model: { providerID: "p", id: "m" },
       inferenceConcurrency: 1,
       inferenceRateLimitMs: 0,

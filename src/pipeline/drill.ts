@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { chunkBudgetBytes } from "../lib/budget.js";
 import { sliceFile } from "../lib/chunk.js";
 import {
@@ -14,6 +13,7 @@ import {
 import type { ChadOptions } from "../options.js";
 import type { Hit, TocEntry } from "../types.js";
 import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
+import { readFileChecked } from "./fs.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
 import { RateLimiter } from "./rate-limiter.js";
 
@@ -30,7 +30,8 @@ import { RateLimiter } from "./rate-limiter.js";
  * All-or-nothing: any candidate failure raises a PipelineError listing every
  * failed candidate (settleAllOrNothing is the single home of that policy).
  * The overflow fold within a single candidate stays sequential — it threads a
- * running distill forward, a true dependency chain, not parallelizable work.
+ * running distill forward, a true dependency chain, not parallelizable work —
+ * but each of its dispatches still passes through the valve.
  */
 export async function runDrill(
   ctx: GenerateCtx,
@@ -52,7 +53,7 @@ export async function runDrill(
     { concurrency: opts.inferenceConcurrency },
     async (entry) => {
       if (limiter) await limiter.acquire();
-      return drillOne(ctx, opts, query, entry, maxBytes);
+      return drillOne(ctx, opts, query, entry, maxBytes, limiter);
     },
   );
 
@@ -74,8 +75,9 @@ async function drillOne(
   query: string,
   entry: TocEntry,
   maxBytes: number,
+  limiter: RateLimiter | null,
 ): Promise<Hit | null> {
-  const text = await readFile(entry.path, "utf8"); // ENOENT → failure naming the path
+  const text = await readFileChecked(entry.path); // FsError naming the path
 
   const result =
     text.length <= maxBytes
@@ -85,18 +87,23 @@ async function drillOne(
           buildDrillPrompt(query, text),
           parseDrillResult,
         )
-      : await drillOverflow(ctx, opts, query, text, maxBytes);
+      : await drillOverflow(ctx, opts, query, text, maxBytes, limiter);
 
   return result.match ? toHit(entry, result) : null;
 }
 
-/** Left-to-right reduce over parts, threading the running distill forward. */
+/**
+ * Left-to-right reduce over parts, threading the running distill forward. The
+ * fold is sequential (a dependency chain), but every dispatch still passes
+ * through the rate-limit valve — no model call leaves the app unthrottled.
+ */
 async function drillOverflow(
   ctx: GenerateCtx,
   opts: ChadOptions,
   query: string,
   text: string,
   maxBytes: number,
+  limiter: RateLimiter | null,
 ): Promise<{ match: boolean; matchReason: string | null }> {
   const sliced = sliceFile(text, maxBytes);
   if (!sliced.ok) throw sliced.error;
@@ -105,6 +112,7 @@ async function drillOverflow(
   let distill: string | null = null;
 
   for (const part of sliced.value) {
+    if (limiter) await limiter.acquire();
     const partResult = await generateChecked(
       ctx,
       opts.model,
@@ -117,6 +125,7 @@ async function drillOverflow(
     }
   }
 
+  if (limiter) await limiter.acquire();
   return generateChecked(
     ctx,
     opts.model,

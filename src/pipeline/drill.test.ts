@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { REFERENCE_AVAILABLE_CONTEXT } from "../lib/budget.js";
 import { runDrill } from "./drill.js";
 import type { GenerateCtx } from "./model.js";
 import type { ChadOptions } from "../options.js";
@@ -59,7 +60,7 @@ describe("runDrill", () => {
     opts = {
       tocPath: join(tmp, "TOC.yaml"), // unused by runDrill
       baseDir: tmp,
-      availableContext: 262_144,
+      availableContext: REFERENCE_AVAILABLE_CONTEXT,
       model: { providerID: "p", id: "m" },
       inferenceConcurrency: 1,
       inferenceRateLimitMs: 0,
@@ -190,7 +191,67 @@ describe("runDrill", () => {
     expect(partCalls.at(-1)).toContain("So far found in earlier parts");
   });
 
-  it("raises a PipelineError naming the path when a file is missing", async () => {
+  it("runs the final fold with empty evidence when no part matches", async () => {
+    // Every part returns {relevant: false, evidence: null}, so `evidence` stays
+    // empty and `distill` stays null throughout. The final fold must still run
+    // (with an empty evidence list), and no part prompt may carry a "So far
+    // found" distill — there was never any to thread forward.
+    const bigDir = join(tmp, "projects/alpha/docs");
+    const bigContent = Array.from(
+      { length: 100 },
+      (_, i) => `line ${i} about something else`,
+    ).join("\n");
+    await writeFile(join(bigDir, "nomatch.md"), bigContent, "utf8");
+
+    const { chunkBudgetBytes } = await import("../lib/budget.js");
+    const enc = new TextEncoder();
+    const fileSize = enc.encode(bigContent).length;
+    const refN = 10_000;
+    const refBudget = chunkBudgetBytes(refN);
+    const smallOpts = {
+      ...opts,
+      availableContext: Math.max(
+        1,
+        Math.round((refN * fileSize) / (2 * refBudget)),
+      ),
+    };
+
+    const prompts: string[] = [];
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async ({ prompt }) => {
+          prompts.push(prompt);
+          if (prompt.includes("Read part")) {
+            return {
+              text: JSON.stringify({ relevant: false, evidence: null }),
+            };
+          }
+          // Final fold: no evidence collected, model still answers non-match.
+          return {
+            text: JSON.stringify({ match: false, matchReason: null }),
+          };
+        },
+      },
+    };
+
+    const hits = await runDrill(ctx, smallOpts, "garden soil", [
+      docEntry("nomatch.md", join(bigDir, "nomatch.md")),
+    ]);
+
+    // No evidence -> no match -> no hits.
+    expect(hits).toEqual([]);
+    const partCalls = prompts.filter((p) => p.includes("Read part"));
+    expect(partCalls.length).toBeGreaterThanOrEqual(2);
+    // The fold ran with an empty evidence list.
+    expect(prompts.at(-1)).toContain("You reviewed a document part by part");
+    expect(prompts.at(-1)).toContain("is:\n");
+    // No part ever carried a distill (evidence was always empty).
+    for (const p of partCalls) {
+      expect(p).not.toContain("So far found in earlier parts");
+    }
+  });
+
+  it("raises a PipelineError wrapping an FsError when a file is missing", async () => {
     const ctx: GenerateCtx = {
       generate: { text: async () => ({ text: "{}" }) },
     };
@@ -202,9 +263,9 @@ describe("runDrill", () => {
       code: "pipeline",
       total: 1,
       attempted: 1,
-      failures: [{ index: 0, error: expect.anything() }],
+      failures: [{ index: 0, error: expect.objectContaining({ code: "fs" }) }],
     });
-    // The ENOENT message still names the missing file.
+    // The FsError message still names the missing file.
     await expect(
       runDrill(ctx, opts, "q", [
         docEntry("ghost.md", join(tmp, "projects/alpha/docs/ghost.md")),
@@ -295,5 +356,68 @@ describe("runDrill", () => {
       attempted: 2,
       failures: [{ index: 1, error: expect.anything() }],
     });
+  });
+
+  it("paces every overflow-fold dispatch through the valve when inferenceRateLimitMs > 0", async () => {
+    // One over-budget candidate forces a multi-part fold. The regression this
+    // pins: fold dispatches used to bypass the rate-limit valve entirely. Now
+    // every model call — part calls and the final fold — is spaced by the
+    // interval, exactly like pool-level dispatches.
+    const bigDir = join(tmp, "projects/alpha/docs");
+    const bigContent = Array.from(
+      { length: 100 },
+      (_, i) => `line ${i} about garden soil`,
+    ).join("\n");
+    await writeFile(join(bigDir, "throttled.md"), bigContent, "utf8");
+
+    // Back-solve availableContext for a budget of half the file size (same
+    // linear-scaling trick as the overflow test above).
+    const { chunkBudgetBytes } = await import("../lib/budget.js");
+    const enc = new TextEncoder();
+    const fileSize = enc.encode(bigContent).length;
+    const refN = 10_000;
+    const refBudget = chunkBudgetBytes(refN);
+    const throttledOpts = {
+      ...opts,
+      availableContext: Math.max(
+        1,
+        Math.round((refN * fileSize) / (2 * refBudget)),
+      ),
+      inferenceRateLimitMs: 40,
+    };
+
+    const dispatchTimes: number[] = [];
+    const ctx: GenerateCtx = {
+      generate: {
+        text: async ({ prompt }) => {
+          dispatchTimes.push(performance.now());
+          if (prompt.includes("Read part")) {
+            return {
+              text: JSON.stringify({
+                relevant: true,
+                evidence: "part mentions garden soil preparation",
+              }),
+            };
+          }
+          // Final fold call.
+          return {
+            text: JSON.stringify({ match: true, matchReason: MATCH_REASON }),
+          };
+        },
+      },
+    };
+
+    const hits = await runDrill(ctx, throttledOpts, "garden soil", [
+      docEntry("throttled.md", join(bigDir, "throttled.md")),
+    ]);
+
+    expect(hits).toHaveLength(1);
+    // The fold actually ran multiple dispatches (parts + final fold).
+    expect(dispatchTimes.length).toBeGreaterThanOrEqual(3);
+    // Every dispatch — including the fold's — is spaced by >= the interval.
+    const start = dispatchTimes[0];
+    for (let i = 1; i < dispatchTimes.length; i++) {
+      expect(dispatchTimes[i] - start).toBeGreaterThanOrEqual(i * 40 - 20);
+    }
   });
 });

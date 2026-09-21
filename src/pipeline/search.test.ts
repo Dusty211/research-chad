@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { REFERENCE_AVAILABLE_CONTEXT } from "../lib/budget.js";
 import { runSearch } from "./search.js";
 import type { GenerateCtx } from "./model.js";
 import type { ChadOptions } from "../options.js";
@@ -45,7 +46,7 @@ projects:
     opts = {
       tocPath,
       baseDir: tmp,
-      availableContext: 262_144,
+      availableContext: REFERENCE_AVAILABLE_CONTEXT,
       model: { providerID: "p", id: "m" },
       inferenceConcurrency: 1,
       inferenceRateLimitMs: 0,

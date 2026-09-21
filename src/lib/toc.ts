@@ -34,8 +34,8 @@ export function resolveEntryPath(
 }
 
 /**
- * Parse TOC.yaml text into entries. Pure — no fs, no ctx.
- * Unknown keys (e.g. legacy uuid/created_at) are ignored by design.
+ * Parse TOC.yaml text into entries. Unknown keys (e.g. legacy uuid/created_at)
+ * are ignored by design.
  */
 export function parseToc(yamlText: string, baseDir: string): Result<Toc> {
   let data: unknown;

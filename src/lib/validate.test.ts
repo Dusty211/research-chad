@@ -107,6 +107,17 @@ describe("parseDrillPartResult", () => {
     );
     expect(result.ok).toBe(false);
   });
+
+  it("rejects invalid JSON with the raw output preserved", () => {
+    const result = parseDrillPartResult("not json {");
+    expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("model_output");
+      expect((result.error as unknown as { raw: string }).raw).toBe(
+        "not json {",
+      );
+    }
+  });
 });
 
 describe("parseDrillResult", () => {

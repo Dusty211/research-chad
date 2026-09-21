@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { REFERENCE_AVAILABLE_CONTEXT } from "../lib/budget.js";
 import { loadEntries, runStage1 } from "./stage1.js";
 import type { GenerateCtx } from "./model.js";
 import type { ChadOptions } from "../options.js";
@@ -52,7 +53,7 @@ projects:
     const opts: ChadOptions = {
       tocPath,
       baseDir: tmp,
-      availableContext: 262_144,
+      availableContext: REFERENCE_AVAILABLE_CONTEXT,
       model: { providerID: "p", id: "m" },
       inferenceConcurrency: 1,
       inferenceRateLimitMs: 0,
@@ -75,7 +76,7 @@ projects:
     const opts: ChadOptions = {
       tocPath,
       baseDir: tmp,
-      availableContext: 262_144,
+      availableContext: REFERENCE_AVAILABLE_CONTEXT,
       model: { providerID: "p", id: "m" },
       inferenceConcurrency: 1,
       inferenceRateLimitMs: 0,
@@ -86,19 +87,20 @@ projects:
     });
   });
 
-  it("rejects with ENOENT when the TOC file is missing (raw fs error, not wrapped)", async () => {
+  it("rejects with an FsError naming the path when the TOC file is missing", async () => {
     const opts: ChadOptions = {
       tocPath: join(tmp, "does-not-exist.yaml"),
       baseDir: tmp,
-      availableContext: 262_144,
+      availableContext: REFERENCE_AVAILABLE_CONTEXT,
       model: { providerID: "p", id: "m" },
       inferenceConcurrency: 1,
       inferenceRateLimitMs: 0,
     };
 
-    // readFile runs before parseToc, so a missing file surfaces as the raw
-    // fs ENOENT, not a TocParseError.
-    await expect(loadEntries(opts)).rejects.toMatchObject({ code: "ENOENT" });
+    // readFile runs before parseToc, so a missing file surfaces as an FsError
+    // (stable code "fs"), not a TocParseError.
+    await expect(loadEntries(opts)).rejects.toMatchObject({ code: "fs" });
+    await expect(loadEntries(opts)).rejects.toThrow(/does-not-exist\.yaml/);
   });
 });
 
@@ -117,7 +119,7 @@ describe("runStage1", () => {
     opts = {
       tocPath: join(tmp, "TOC.yaml"), // unused by runStage1 (entries passed in)
       baseDir: tmp,
-      availableContext: 262_144, // budget ~200KB: everything fits one chunk
+      availableContext: REFERENCE_AVAILABLE_CONTEXT, // budget ~200KB: everything fits one chunk
       model: { providerID: "p", id: "m" },
       inferenceConcurrency: 1,
       inferenceRateLimitMs: 0,

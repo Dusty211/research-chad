@@ -1,4 +1,3 @@
-import { readFile } from "node:fs/promises";
 import { chunkBudgetBytes } from "../lib/budget.js";
 import { packEntries } from "../lib/chunk.js";
 import { parseToc } from "../lib/toc.js";
@@ -7,6 +6,7 @@ import { parseChunkResult } from "../lib/validate.js";
 import type { ChadOptions } from "../options.js";
 import type { TocEntry } from "../types.js";
 import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
+import { readFileChecked } from "./fs.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
 import { RateLimiter } from "./rate-limiter.js";
 
@@ -16,9 +16,9 @@ export interface Stage1Hit {
   matchReason: string;
 }
 
-/** Load and parse the TOC once. Throws the TocParseError on malformed input. */
+/** Load and parse the TOC once. Throws FsError on a missing file, TocParseError on malformed input. */
 export async function loadEntries(opts: ChadOptions): Promise<TocEntry[]> {
-  const yamlText = await readFile(opts.tocPath, "utf8");
+  const yamlText = await readFileChecked(opts.tocPath);
   const toc = parseToc(yamlText, opts.baseDir);
   if (!toc.ok) throw toc.error;
   return toc.value.entries;

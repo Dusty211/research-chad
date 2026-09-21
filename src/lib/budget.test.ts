@@ -1,16 +1,16 @@
 import { describe, it, expect } from "vitest";
-import { chunkBudgetBytes } from "./budget.js";
+import { chunkBudgetBytes, REFERENCE_AVAILABLE_CONTEXT } from "./budget.js";
 
 describe("chunkBudgetBytes", () => {
   it("yields ~200KB for the validated 256K-token configuration", () => {
-    const bytes = chunkBudgetBytes(262_144);
+    const bytes = chunkBudgetBytes(REFERENCE_AVAILABLE_CONTEXT);
     expect(bytes).toBeGreaterThan(180_000);
     expect(bytes).toBeLessThan(220_000);
   });
 
   it("scales linearly with available context", () => {
     const small = chunkBudgetBytes(65_536);
-    const large = chunkBudgetBytes(262_144);
+    const large = chunkBudgetBytes(REFERENCE_AVAILABLE_CONTEXT);
     // floor() on each side adds a few bytes of drift.
     expect(Math.abs(large - small * 4)).toBeLessThanOrEqual(4);
   });

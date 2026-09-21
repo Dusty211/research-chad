@@ -2,6 +2,7 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { REFERENCE_AVAILABLE_CONTEXT } from "./lib/budget.js";
 import plugin from "./index.js";
 
 type CapturedTool = {
@@ -40,7 +41,7 @@ function makeOptions(tocPath: string): unknown {
   return {
     tocPath,
     baseDir: join(tmpdir(), "research-chad-nonexistent-base"),
-    availableContext: 262144,
+    availableContext: REFERENCE_AVAILABLE_CONTEXT,
     model: { providerID: "test", id: "test-model" },
   };
 }

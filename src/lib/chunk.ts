@@ -33,7 +33,7 @@ export function packEntries(
     const text = current.join("");
     chunks.push({
       index: chunks.length,
-      total: 0, // finalized below
+      total: 0, // set once all chunks are known (see below)
       text,
       byteLength: byteLength(text),
       paths: currentPaths,
@@ -71,12 +71,15 @@ export function packEntries(
  * budget must be sized so this cannot happen for real data).
  */
 export function sliceFile(text: string, maxBytes: number): Result<Part[]> {
-  if (text.length === 0) {
+  if (byteLength(text) === 0) {
     return err(new ChunkBudgetError("cannot slice empty file content"));
   }
 
   const lines = text.split("\n");
-  // Reassemble with newlines; the final element after a trailing newline is "".
+  // Lines are reassembled with "\n", so newlines between lines within a part are
+  // preserved. A trailing newline in the source splits to a final "" element,
+  // which re-materializes as that part's trailing newline on join — so joining
+  // the parts back with "\n" reproduces the original text exactly.
   const parts: Part[] = [];
   let current: string[] = [];
   let currentSize = 0;
@@ -84,7 +87,6 @@ export function sliceFile(text: string, maxBytes: number): Result<Part[]> {
   const flush = () => {
     if (current.length === 0) return;
     const body = current.join("\n");
-    // Preserve the trailing newline of the original text for all but the last part.
     parts.push({
       index: parts.length,
       total: 0,

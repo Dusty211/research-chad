@@ -128,4 +128,21 @@ describe("sliceFile", () => {
     if (sliced.ok) return;
     expect(sliced.error.code).toBe("chunk_budget");
   });
+
+  it("preserves a trailing newline across multi-part slices", () => {
+    // The source ends with "\n"; split() turns that into a final "" element.
+    // Slicing into >=2 parts must still let join("\n") reproduce the original
+    // exactly — no dropped or duplicated newlines at the part boundaries.
+    const text = "a\nb\nc\n";
+    // Budget of 4 bytes: "a\nb" is 3, adding "c" would exceed, so it splits.
+    const sliced = sliceFile(text, 4);
+    expect(sliced.ok).toBe(true);
+    if (!sliced.ok) return;
+
+    expect(sliced.value.length).toBeGreaterThan(1);
+    // Raw concatenation with the joining newline equals the source verbatim.
+    expect(sliced.value.map((p) => p.text).join("\n")).toBe(text);
+    // The trailing newline lands on the last part (as a zero-length final line).
+    expect(sliced.value.at(-1)!.text.endsWith("\n")).toBe(true);
+  });
 });

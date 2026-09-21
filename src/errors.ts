@@ -50,6 +50,11 @@ export class ModelOutputError extends AppError {
   }
 }
 
+/** A filesystem operation failed on an expected path (missing file, permission). */
+export class FsError extends AppError {
+  readonly code = "fs";
+}
+
 /** One failed item in a pipeline run: its input position and the error it threw. */
 export interface PipelineFailure {
   /** Zero-based input index of the failed item. */

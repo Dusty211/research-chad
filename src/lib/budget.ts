@@ -9,6 +9,9 @@
 const CHARS_PER_TOKEN = 3.5;
 const CONTENT_FRACTION = 0.218;
 
+/** The 256K-token context the calibration above was validated against. Tests use this as their reference availableContext. */
+export const REFERENCE_AVAILABLE_CONTEXT = 262_144;
+
 export function chunkBudgetBytes(availableContextTokens: number): number {
   return Math.floor(
     availableContextTokens * CHARS_PER_TOKEN * CONTENT_FRACTION,

@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { REFERENCE_AVAILABLE_CONTEXT } from "./lib/budget.js";
 import {
   MAX_INFERENCE_CONCURRENCY,
   validateOptions,
@@ -8,7 +9,7 @@ import {
 const VALID = {
   tocPath: "/data/TOC.yaml",
   baseDir: "/data",
-  availableContext: 262_144,
+  availableContext: REFERENCE_AVAILABLE_CONTEXT,
   model: { providerID: "test", id: "test-model" },
 };
 
