@@ -5,7 +5,19 @@
 - You are only permitted to use Git operations that are read only and do not modify anything.
 - Never perform any operation with Git which modifies the git state or the data on disk.
 
-# Working guidelines
+## Design priorities
+- You must strictly prioritize code quality over convenience. Never take the "easy way out" because doing it properly is "too much work" or would "take too long."
+- You must strictly use idiomatic JS/TS patterns and conventions.
+- You must always default to fundemental software engineering principles.
+- Always do things the correct canonical way.
+- Technical debt is NEVER EVER an acceptable trade-off under any circumstance.
+- Don't repeat yourself (DRY)
+- Always use the principle of separation of concerns.
+- Prefer pure functions always.
+- Failures always default to hard and loud unless there is a valid reason otherwise.
+- Code should be broken into multiple files correctly. If we have a file with massive line counts, that file should be considered as a candidate to be broken into multiple files.
+
+## Working guidelines
 
 - Use consistent best practices and consistent patterns across the project.
 - Use DRY (don't repeat yourself) practices where it makes sense.
