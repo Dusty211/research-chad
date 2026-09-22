@@ -46,9 +46,10 @@ describe("generateChecked", () => {
   });
 
   it("retries a schema-violation failure once with the identical prompt", async () => {
-    // A schema violation is a model-output failure like any other: the same
-    // re-roll policy applies. First output fails, second passes.
-    const ctx = makeCtx(["{ not valid json", "good"]);
+    // A schema violation — well-formed JSON that fails validation — retries
+    // under the same policy as any model-output failure. First output fails,
+    // second passes.
+    const ctx = makeCtx(['{"match": "yes"}', "good"]);
     const value = await generateChecked(ctx, MODEL, "prompt", check);
     expect(value).toBe(42);
     expect(ctx.calls).toHaveLength(2);

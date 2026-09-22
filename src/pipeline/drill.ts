@@ -12,8 +12,11 @@ import {
 } from "../lib/validate.js";
 import type { ChadOptions } from "../options.js";
 import type { Hit, TocEntry } from "../types.js";
-import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
-import type { Gate } from "./concurrency.js";
+import {
+  mapWithConcurrency,
+  settleAllOrNothing,
+  type Gate,
+} from "./concurrency.js";
 import { readFileChecked } from "./fs.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
 import { makeGate, type Clock } from "./rate-limiter.js";
