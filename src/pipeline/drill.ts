@@ -1,5 +1,5 @@
 import { chunkBudgetBytes } from "../lib/budget.js";
-import { sliceFile } from "../lib/chunk.js";
+import { byteLength, sliceFile } from "../lib/chunk.js";
 import {
   buildDrillFoldPrompt,
   buildDrillPartPrompt,
@@ -13,9 +13,10 @@ import {
 import type { ChadOptions } from "../options.js";
 import type { Hit, TocEntry } from "../types.js";
 import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
+import type { Gate } from "./concurrency.js";
 import { readFileChecked } from "./fs.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
-import { RateLimiter } from "./rate-limiter.js";
+import { makeGate, type Clock } from "./rate-limiter.js";
 
 /**
  * Stage 2: for each candidate entry, read its file and judge relevance.
@@ -38,20 +39,18 @@ export async function runDrill(
   opts: ChadOptions,
   query: string,
   candidates: TocEntry[],
+  clock?: Clock,
 ): Promise<Hit[]> {
   const maxBytes = chunkBudgetBytes(opts.availableContext);
 
   // The valve paces every individual dispatch; the pool bounds how many are
   // in-flight. Composed here so neither concern knows about the other.
-  const limiter =
-    opts.inferenceRateLimitMs > 0
-      ? new RateLimiter(opts.inferenceRateLimitMs)
-      : null;
+  const gate = makeGate(opts.inferenceRateLimitMs, clock);
 
   const outcomes = await mapWithConcurrency(
     candidates,
-    { concurrency: opts.inferenceConcurrency, gate: limiter ?? undefined },
-    async (entry) => drillOne(ctx, opts, query, entry, maxBytes, limiter),
+    { concurrency: opts.inferenceConcurrency, gate },
+    async (entry) => drillOne(ctx, opts, query, entry, maxBytes, gate),
   );
 
   // Past this point every value is a settled Hit | null; undefined (never
@@ -72,19 +71,19 @@ async function drillOne(
   query: string,
   entry: TocEntry,
   maxBytes: number,
-  limiter: RateLimiter | null,
+  gate: Gate | undefined,
 ): Promise<Hit | null> {
   const text = await readFileChecked(entry.path); // FsError naming the path
 
   const result =
-    text.length <= maxBytes
+    byteLength(text) <= maxBytes
       ? await generateChecked(
           ctx,
           opts.model,
           buildDrillPrompt(query, text),
           parseDrillResult,
         )
-      : await drillOverflow(ctx, opts, query, text, maxBytes, limiter);
+      : await drillOverflow(ctx, opts, query, text, maxBytes, gate);
 
   return result.match ? toHit(entry, result) : null;
 }
@@ -100,7 +99,7 @@ async function drillOverflow(
   query: string,
   text: string,
   maxBytes: number,
-  limiter: RateLimiter | null,
+  gate: Gate | undefined,
 ): Promise<{ match: boolean; matchReason: string | null }> {
   const sliced = sliceFile(text, maxBytes);
   if (!sliced.ok) throw sliced.error;
@@ -109,7 +108,9 @@ async function drillOverflow(
   let distill: string | null = null;
 
   for (const part of sliced.value) {
-    if (limiter) await limiter.acquire();
+    // Part dispatches are dependent sequential steps within one item, not
+    // covered by the pool gate — each still passes through the valve.
+    if (gate) await gate.acquire();
     const partResult = await generateChecked(
       ctx,
       opts.model,
@@ -122,7 +123,8 @@ async function drillOverflow(
     }
   }
 
-  if (limiter) await limiter.acquire();
+  // Final fold dispatch — same reason as the part loop above.
+  if (gate) await gate.acquire();
   return generateChecked(
     ctx,
     opts.model,

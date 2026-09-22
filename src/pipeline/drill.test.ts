@@ -2,7 +2,10 @@ import { describe, it, expect, beforeAll, afterAll } from "vitest";
 import { mkdtemp, mkdir, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { REFERENCE_AVAILABLE_CONTEXT } from "../lib/budget.js";
+import {
+  REFERENCE_AVAILABLE_CONTEXT,
+  chunkBudgetBytes,
+} from "../lib/budget.js";
 import { runDrill } from "./drill.js";
 import type { GenerateCtx } from "./model.js";
 import type { ChadOptions } from "../options.js";
@@ -10,6 +13,27 @@ import type { TocEntry } from "../types.js";
 
 const MATCH_REASON =
   "Covers garden soil preparation. Gives exact steps. References the spring planting guide.";
+
+/**
+ * Back-solve availableContext for a chunk budget of fileSize / divisor bytes.
+ * chunkBudgetBytes is linear in availableContext, so scaling from a reference
+ * point yields the exact input regardless of the formula's constants.
+ */
+function optsForBudget(
+  base: ChadOptions,
+  fileSize: number,
+  divisor: number,
+): ChadOptions {
+  const refN = 10_000;
+  const refBudget = chunkBudgetBytes(refN);
+  return {
+    ...base,
+    availableContext: Math.max(
+      1,
+      Math.round((refN * fileSize) / (divisor * refBudget)),
+    ),
+  };
+}
 
 function docEntry(name: string, path: string): TocEntry {
   return {
@@ -58,7 +82,7 @@ describe("runDrill", () => {
       "utf8",
     );
     opts = {
-      tocPath: join(tmp, "TOC.yaml"), // unused by runDrill
+      tocPath: join(tmp, "TOC.yaml"),
       baseDir: tmp,
       availableContext: REFERENCE_AVAILABLE_CONTEXT,
       model: { providerID: "p", id: "m" },
@@ -137,25 +161,10 @@ describe("runDrill", () => {
     ).join("\n");
     await writeFile(join(bigDir, "big.md"), bigContent, "utf8");
 
-    // Force overflow by making the budget a known fraction of the file size.
-    // chunkBudgetBytes is linear in availableContext, so we back-solve the
-    // availableContext that yields a budget of half the file size — the file
-    // then always exceeds it and slices into multiple parts, regardless of the
-    // formula's constants.
-    const { chunkBudgetBytes } = await import("../lib/budget.js");
-    const enc = new TextEncoder();
-    const fileSize = enc.encode(bigContent).length;
-    // Linear: budget(n) = floor(n * C). Find n such that budget(n) ≈ fileSize/2
-    // by scaling from a reference point (avoids hardcoding C).
-    const refN = 10_000;
-    const refBudget = chunkBudgetBytes(refN);
-    const smallOpts = {
-      ...opts,
-      availableContext: Math.max(
-        1,
-        Math.round((refN * fileSize) / (2 * refBudget)),
-      ),
-    };
+    // Force overflow by making the budget a known fraction of the file size —
+    // the file then always exceeds it and slices into multiple parts.
+    const fileSize = new TextEncoder().encode(bigContent).length;
+    const smallOpts = optsForBudget(opts, fileSize, 2);
 
     const prompts: string[] = [];
     const ctx: GenerateCtx = {
@@ -203,18 +212,8 @@ describe("runDrill", () => {
     ).join("\n");
     await writeFile(join(bigDir, "nomatch.md"), bigContent, "utf8");
 
-    const { chunkBudgetBytes } = await import("../lib/budget.js");
-    const enc = new TextEncoder();
-    const fileSize = enc.encode(bigContent).length;
-    const refN = 10_000;
-    const refBudget = chunkBudgetBytes(refN);
-    const smallOpts = {
-      ...opts,
-      availableContext: Math.max(
-        1,
-        Math.round((refN * fileSize) / (2 * refBudget)),
-      ),
-    };
+    const fileSize = new TextEncoder().encode(bigContent).length;
+    const smallOpts = optsForBudget(opts, fileSize, 2);
 
     const prompts: string[] = [];
     const ctx: GenerateCtx = {
@@ -326,14 +325,17 @@ describe("runDrill", () => {
     // Three candidates, two slots: garden + ghost dispatch together. The
     // missing file fails fast (ENOENT before any model call) while the garden
     // read/model call is still in-flight, so cooking is never dispatched:
-    // attempted 2 of 3.
+    // attempted 2 of 3. The garden model call is held on a controllable
+    // promise (no wall-clock) until the failure has landed and been asserted.
     const parallelOpts = { ...opts, inferenceConcurrency: 2 };
+    let releaseGarden: () => void;
+    const gardenInFlight = new Promise<void>((r) => {
+      releaseGarden = r;
+    });
     const ctx: GenerateCtx = {
       generate: {
-        text: async () => {
-          // Hold the model call open past the fast ENOENT so the stop-dispatch
-          // decision happens while garden is still in-flight.
-          await new Promise((r) => setTimeout(r, 30));
+        text: async ({ prompt }) => {
+          if (prompt.includes("# Garden")) await gardenInFlight;
           return {
             text: JSON.stringify({ match: false, matchReason: null }),
           };
@@ -347,9 +349,13 @@ describe("runDrill", () => {
       docEntry("cooking.md", join(tmp, "projects/alpha/docs/cooking.md")),
     ];
 
-    const error = await runDrill(ctx, parallelOpts, "q", candidates).catch(
-      (e) => e,
-    );
+    const run = runDrill(ctx, parallelOpts, "q", candidates).catch((e) => e);
+    // Yield for the fast ENOENT to be recorded while garden is still in-flight.
+    await Promise.resolve();
+    await Promise.resolve();
+    // Settle the run now that the failure has landed; cooking was never claimed.
+    releaseGarden!();
+    const error = await run;
     expect(error).toMatchObject({
       code: "pipeline",
       total: 3,
@@ -359,8 +365,7 @@ describe("runDrill", () => {
   });
 
   it("paces every overflow-fold dispatch through the valve when inferenceRateLimitMs > 0", async () => {
-    // One over-budget candidate forces a multi-part fold. The regression this
-    // pins: fold dispatches used to bypass the rate-limit valve entirely. Now
+    // One over-budget candidate forces a multi-part fold. Invariant pinned:
     // every model call — part calls and the final fold — is spaced by the
     // interval, exactly like pool-level dispatches.
     const bigDir = join(tmp, "projects/alpha/docs");
@@ -370,19 +375,9 @@ describe("runDrill", () => {
     ).join("\n");
     await writeFile(join(bigDir, "throttled.md"), bigContent, "utf8");
 
-    // Back-solve availableContext for a budget of half the file size (same
-    // linear-scaling trick as the overflow test above).
-    const { chunkBudgetBytes } = await import("../lib/budget.js");
-    const enc = new TextEncoder();
-    const fileSize = enc.encode(bigContent).length;
-    const refN = 10_000;
-    const refBudget = chunkBudgetBytes(refN);
+    const fileSize = new TextEncoder().encode(bigContent).length;
     const throttledOpts = {
-      ...opts,
-      availableContext: Math.max(
-        1,
-        Math.round((refN * fileSize) / (2 * refBudget)),
-      ),
+      ...optsForBudget(opts, fileSize, 2),
       inferenceRateLimitMs: 40,
     };
 

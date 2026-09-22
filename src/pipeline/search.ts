@@ -16,7 +16,6 @@ export async function runSearch(
   query: string,
 ): Promise<Hit[]> {
   const entries = await loadEntries(opts);
-  // runStage1 already dedupes by entry path, so each candidate is drilled once.
   const candidates = (await runStage1(ctx, opts, query, entries)).map(
     ({ entry }) => entry,
   );

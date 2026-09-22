@@ -117,7 +117,7 @@ describe("runStage1", () => {
   beforeAll(async () => {
     tmp = await mkdtemp(join(tmpdir(), "research-chad-stage1-run-"));
     opts = {
-      tocPath: join(tmp, "TOC.yaml"), // unused by runStage1 (entries passed in)
+      tocPath: join(tmp, "TOC.yaml"),
       baseDir: tmp,
       availableContext: REFERENCE_AVAILABLE_CONTEXT, // budget ~200KB: everything fits one chunk
       model: { providerID: "p", id: "m" },
@@ -234,8 +234,11 @@ describe("runStage1", () => {
     });
   });
 
-  it("lists every failed chunk in a PipelineError and stops dispatching after the first", async () => {
-    // Force a multi-chunk split (same budget trick as the cross-chunk dedup test).
+  it("lists every failed chunk in a PipelineError with its attempted/total counts", async () => {
+    // Force a multi-chunk split (same budget trick as the cross-chunk dedup
+    // test) so two chunks are dispatched: one succeeds, one fails. The
+    // PipelineError must name the failed chunk and report 2 of 2 attempted.
+    // (Stop-dispatch after a failure is pinned in concurrency.test.ts.)
     const multiOpts = { ...opts, availableContext: 80 };
     let call = 0;
     const ctx: GenerateCtx = {

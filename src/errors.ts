@@ -55,6 +55,11 @@ export class FsError extends AppError {
   readonly code = "fs";
 }
 
+/** Tool input did not match the tool's declared schema. */
+export class InvalidInputError extends AppError {
+  readonly code = "invalid_input";
+}
+
 /** One failed item in a pipeline run: its input position and the error it threw. */
 export interface PipelineFailure {
   /** Zero-based input index of the failed item. */
@@ -65,8 +70,9 @@ export interface PipelineFailure {
 
 /**
  * A pipeline run failed under the all-or-nothing policy. Carries every failed
- * item (input order) plus how many items were attempted before dispatch
- * stopped, so the message distinguishes one bad item from a systemic failure.
+ * item (input order) plus how many items began executing before the run was
+ * abandoned, so the message distinguishes one bad item from a systemic
+ * failure.
  */
 export class PipelineError extends AppError {
   readonly code = "pipeline";

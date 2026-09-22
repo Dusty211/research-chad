@@ -8,7 +8,7 @@ import type { TocEntry } from "../types.js";
 import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
 import { readFileChecked } from "./fs.js";
 import { generateChecked, type GenerateCtx } from "./model.js";
-import { RateLimiter } from "./rate-limiter.js";
+import { makeGate, type Clock } from "./rate-limiter.js";
 
 /** A stage-1 relevance judgment: an entry plus the model's reason for it. */
 export interface Stage1Hit {
@@ -43,6 +43,7 @@ export async function runStage1(
   opts: ChadOptions,
   query: string,
   entries: TocEntry[],
+  clock?: Clock,
 ): Promise<Stage1Hit[]> {
   const maxBytes = chunkBudgetBytes(opts.availableContext);
   const packed = packEntries(entries, maxBytes);
@@ -52,14 +53,11 @@ export async function runStage1(
 
   // The valve paces every individual dispatch; the pool bounds how many are
   // in-flight. Composed here so neither concern knows about the other.
-  const limiter =
-    opts.inferenceRateLimitMs > 0
-      ? new RateLimiter(opts.inferenceRateLimitMs)
-      : null;
+  const gate = makeGate(opts.inferenceRateLimitMs, clock);
 
   const outcomes = await mapWithConcurrency(
     packed.value,
-    { concurrency: opts.inferenceConcurrency, gate: limiter ?? undefined },
+    { concurrency: opts.inferenceConcurrency, gate },
     async (chunk) =>
       generateChecked(
         ctx,

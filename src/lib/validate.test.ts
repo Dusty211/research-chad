@@ -42,9 +42,13 @@ describe("parseChunkResult", () => {
     }
   });
 
-  it("rejects non-array JSON", () => {
+  it("rejects non-array JSON with the raw output preserved", () => {
     const result = parseChunkResult('{"a": 1}');
     expect(result.ok).toBe(false);
+    if (!result.ok) {
+      expect(result.error.code).toBe("model_output");
+      expect((result.error as unknown as { raw: string }).raw).toBe('{"a": 1}');
+    }
   });
 
   it("rejects elements that are not {path, matchReason} objects", () => {

@@ -9,7 +9,7 @@ Both tools take a single input:
 
 - `query` (string, required) — what you are looking for.
 
-On failure both tools return a structured error object instead of a hits array: `{ "ok": false, "error": { "code", "message" } }`. Error codes: `toc_parse`, `chunk_budget`, `model_output`, `pipeline`, `options`, `fs`, `unknown`. A `pipeline` error means one or more items (TOC chunks or drill candidates) failed mid-run; its message lists every failed item (position and reason) plus how many items were attempted. Failed model calls and missing candidate files always surface wrapped in `pipeline` — the specific cause appears in the message, so `model_output` never reaches you as a top-level tool code for those cases. A top-level `fs` error means the TOC file itself could not be read (missing or unreadable path).
+On failure both tools return a structured error object instead of a hits array: `{ "ok": false, "error": { "code", "message" } }`. Error codes: `toc_parse`, `chunk_budget`, `model_output`, `pipeline`, `options`, `fs`, `invalid_input`, `unknown`. A `pipeline` error means one or more items (TOC chunks or drill candidates) failed mid-run; its message lists every failed item (position and reason) plus how many items began executing before the run was abandoned. Failed model calls and missing candidate files always surface wrapped in `pipeline` — the specific cause appears in the message, so `model_output` never reaches you as a top-level tool code for those cases. A top-level `fs` error means the TOC file itself could not be read (missing or unreadable path). An `invalid_input` error means the call's arguments did not match the tool schema (a malformed `query`).
 
 ## Setup
 
@@ -59,10 +59,6 @@ TOC entries must resolve to files inside `baseDir`; entries whose paths escape i
 
 - Source lives in `src/`; tests in `src/*.test.ts` (Vitest). See [AGENTS.md](./AGENTS.md) for repo conventions and gotchas.
 - `npm run check` runs lint, typecheck, format check, and tests in one command; `npm run build` emits the published artifact to `dist/`.
-
-## Breaking changes
-
-- v0.0.x: the previously exported `countSentences` helper was removed and replaced by an internal shape check (`hasSentenceShape`). It was never part of the documented tool surface; if you imported it directly, migrate to validating `matchReason` against the enforced floor (≥2 sentence boundaries, ≥20 chars) or drop the dependency.
 
 ## License
 

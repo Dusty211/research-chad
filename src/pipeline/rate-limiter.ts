@@ -1,14 +1,23 @@
+import type { Gate } from "./concurrency.js";
+
 /**
  * A monotonic time source the limiter reads and sleeps against. Production uses
  * the real clock; tests inject a manual one so spacing assertions are exact and
  * deterministic (no wall-clock flakiness). The reservation math is identical in
- * both — only the source of "now" and the sleep mechanism differ.
+ * both — only the source of "now" and the sleep mechanism differ. Production
+ * intervals are expected to be well below the setTimeout clamp (~24.8 days);
+ * larger values are not supported.
  */
 export interface Clock {
   /** Current time in ms, monotonically non-decreasing. */
   now(): number;
   /** Resolve after `ms` elapsed on this clock. */
   sleep(ms: number): Promise<void>;
+}
+
+/** Construct a pacing gate from an interval; undefined means no throttle. */
+export function makeGate(intervalMs: number, clock?: Clock): Gate | undefined {
+  return intervalMs > 0 ? new RateLimiter(intervalMs, clock) : undefined;
 }
 
 /** The production clock: monotonic performance.now() + setTimeout. */

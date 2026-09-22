@@ -113,6 +113,17 @@ describe("parseToc", () => {
     expect(result.error.message).toMatch(/name/);
   });
 
+  it("rejects a non-object doc item", () => {
+    const result = parseToc(
+      "projects:\n  - dir: projects/p\n    docs: ['just a string']\n",
+      BASE,
+    );
+    expect(result.ok).toBe(false);
+    if (result.ok) return;
+    expect(result.error.code).toBe("toc_parse");
+    expect(result.error.message).toMatch(/must be a mapping/);
+  });
+
   it("rejects an empty TOC", () => {
     const result = parseToc("projects: []", BASE);
     expect(result.ok).toBe(false);

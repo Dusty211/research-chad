@@ -35,7 +35,7 @@ export function packEntries(
       index: chunks.length,
       total: 0, // set once all chunks are known (see below)
       text,
-      byteLength: byteLength(text),
+      byteLength: currentSize, // blocks join with "" — the accumulated size is exact
       paths: currentPaths,
     });
     current = [];
@@ -67,8 +67,8 @@ export function packEntries(
 
 /**
  * Slice file text into parts of at most maxBytes, breaking only on line
- * boundaries. A single line longer than maxBytes is its own part (the caller's
- * budget must be sized so this cannot happen for real data).
+ * boundaries. A single line longer than maxBytes fails with ChunkBudgetError —
+ * the caller's budget must be sized so this cannot happen for real data.
  */
 export function sliceFile(text: string, maxBytes: number): Result<Part[]> {
   if (byteLength(text) === 0) {
@@ -91,14 +91,22 @@ export function sliceFile(text: string, maxBytes: number): Result<Part[]> {
       index: parts.length,
       total: 0,
       text: body,
-      byteLength: byteLength(body),
+      byteLength: currentSize, // lines join with "\n" — accounted for in the per-line size
     });
     current = [];
     currentSize = 0;
   };
 
   for (const line of lines) {
-    const size = byteLength(line) + (current.length > 0 ? 1 : 0); // +1 for the joining newline
+    const lineBytes = byteLength(line);
+    if (lineBytes > maxBytes) {
+      return err(
+        new ChunkBudgetError(
+          `a single line is ${lineBytes} bytes, exceeding the ${maxBytes}-byte part budget`,
+        ),
+      );
+    }
+    const size = lineBytes + (current.length > 0 ? 1 : 0); // +1 for the joining newline
     if (currentSize > 0 && currentSize + size > maxBytes) flush();
     current.push(line);
     currentSize += size;

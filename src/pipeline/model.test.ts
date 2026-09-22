@@ -3,13 +3,18 @@ import { generateChecked } from "./model.js";
 import { ModelOutputError } from "../errors.js";
 import type { GenerateCtx } from "./model.js";
 
-function makeCtx(responses: string[]): GenerateCtx & { calls: number[] } {
-  const calls: number[] = [];
+interface RecordedCall {
+  model: { providerID: string; id: string };
+  prompt: string;
+}
+
+function makeCtx(responses: string[]): GenerateCtx & { calls: RecordedCall[] } {
+  const calls: RecordedCall[] = [];
   return {
     calls,
     generate: {
-      text: vi.fn(async ({ prompt }: { prompt: string }) => {
-        calls.push(prompt.length); // record identity of the prompt sent
+      text: vi.fn(async ({ model, prompt }) => {
+        calls.push({ model, prompt });
         return { text: responses[calls.length - 1] };
       }),
     },
@@ -28,14 +33,26 @@ describe("generateChecked", () => {
     const value = await generateChecked(ctx, MODEL, "prompt", check);
     expect(value).toBe(42);
     expect(ctx.calls).toHaveLength(1);
+    expect(ctx.calls[0].model).toEqual(MODEL);
   });
 
   it("retries once with the identical prompt and succeeds", async () => {
     const ctx = makeCtx(["bad", "good"]);
     const value = await generateChecked(ctx, MODEL, "prompt", check);
     expect(value).toBe(42);
-    // Both calls sent the same prompt (same length recorded).
-    expect(ctx.calls).toEqual([6, 6]);
+    // Both calls sent the same model and the exact same prompt.
+    expect(ctx.calls.map((c) => c.model)).toEqual([MODEL, MODEL]);
+    expect(ctx.calls.map((c) => c.prompt)).toEqual(["prompt", "prompt"]);
+  });
+
+  it("retries a schema-violation failure once with the identical prompt", async () => {
+    // A schema violation is a model-output failure like any other: the same
+    // re-roll policy applies. First output fails, second passes.
+    const ctx = makeCtx(["{ not valid json", "good"]);
+    const value = await generateChecked(ctx, MODEL, "prompt", check);
+    expect(value).toBe(42);
+    expect(ctx.calls).toHaveLength(2);
+    expect(ctx.calls.map((c) => c.prompt)).toEqual(["prompt", "prompt"]);
   });
 
   it("hard-fails after one retry with the second failure's error", async () => {

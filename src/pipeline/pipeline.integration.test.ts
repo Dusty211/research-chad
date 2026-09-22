@@ -5,7 +5,7 @@ import {
   type Gate,
 } from "./concurrency.js";
 import { RateLimiter } from "./rate-limiter.js";
-import { makeManualClock } from "./rate-limiter.test.js";
+import { makeManualClock } from "../testutil/clock.js";
 
 // Composition lane: the real pool with the real limiter as its gate, on a
 // manual clock. Pins only what composition adds — that RateLimiter satisfies

@@ -1,53 +1,6 @@
 import { describe, it, expect } from "vitest";
-import { RateLimiter, type Clock } from "./rate-limiter.js";
-
-/**
- * A manual clock for deterministic tests. `advance(ms)` moves time forward and
- * resolves any pending sleeps whose target has been reached — in order, with no
- * real timers and no wall-clock dependence. Spacing assertions are therefore
- * exact: the i-th slot lands at precisely t + i*interval. Exported so
- * integration tests that compose a real RateLimiter stay deterministic too.
- */
-export function makeManualClock(start = 0) {
-  let time = start;
-  // Pending sleeps as [targetTime, resolve], kept in reservation order.
-  const pending: { target: number; resolve: () => void }[] = [];
-  // Release times recorded at the moment each sleep resolves (deterministic).
-  const releases: number[] = [];
-
-  const clock: Clock = {
-    now: () => time,
-    sleep(ms) {
-      return new Promise<void>((resolve) => {
-        pending.push({ target: time + ms, resolve });
-      });
-    },
-  };
-
-  /** Advance the clock by `ms`, resolving due sleeps as time crosses them. */
-  function advance(ms: number): void {
-    const end = time + ms;
-    for (;;) {
-      // Find the earliest pending sleep that is now due.
-      let dueIndex = -1;
-      let dueTarget = Infinity;
-      for (let i = 0; i < pending.length; i++) {
-        if (pending[i].target <= end && pending[i].target < dueTarget) {
-          dueTarget = pending[i].target;
-          dueIndex = i;
-        }
-      }
-      if (dueIndex === -1) break;
-      time = dueTarget;
-      const [slot] = pending.splice(dueIndex, 1);
-      releases.push(time); // record at the exact release instant
-      slot.resolve();
-    }
-    time = end;
-  }
-
-  return { clock, advance, releases };
-}
+import { RateLimiter } from "./rate-limiter.js";
+import { makeManualClock } from "../testutil/clock.js";
 
 describe("RateLimiter", () => {
   it("rejects a negative or non-integer interval", () => {
@@ -87,11 +40,11 @@ describe("RateLimiter", () => {
   });
 
   it("spaces concurrent acquirers FIFO, one slot apart, with no bursts", async () => {
-    // The regression this class exists for: N callers racing for the valve must
-    // serialize onto distinct slots, never release two at once. We assert on the
-    // *reserved slot times* (deterministic by construction) and that each caller
-    // is released exactly when its slot comes due — recorded by the clock itself
-    // at resolution, so no microtask-ordering dependence.
+    // N callers racing for the valve must serialize onto distinct slots, never
+    // release two at once. We assert on the *reserved slot times* (deterministic
+    // by construction) and that each caller is released exactly when its slot
+    // comes due — recorded by the clock itself at resolution, so no
+    // microtask-ordering dependence.
     const { clock, advance, releases } = makeManualClock();
     const limiter = new RateLimiter(50, clock);
 
@@ -107,12 +60,15 @@ describe("RateLimiter", () => {
     expect(releases).toEqual([50, 100, 150]);
   });
 
-  it("keeps callers in acquisition order even when they start out of order", async () => {
+  it("reserves slots in acquisition order even when callers start out of order", async () => {
+    // Pins slot *reservation* order: B acquires first (slot t=0), A second
+    // (slot t=40). Each caller proceeds exactly when its own reserved slot
+    // comes due, so B goes before A. The slept-slot FIFO release ordering is
+    // covered by the concurrent-acquirers test.
     const { clock, advance } = makeManualClock();
     const limiter = new RateLimiter(40, clock);
     const releaseOrder: number[] = [];
 
-    // B acquires first (slot t=0), A second (slot t=40). B must release first.
     const b = limiter.acquire().then(() => releaseOrder.push(1));
     advance(40);
     const a = limiter.acquire().then(() => releaseOrder.push(2));

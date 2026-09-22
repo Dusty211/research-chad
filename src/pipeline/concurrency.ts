@@ -1,4 +1,4 @@
-import { PipelineError } from "../errors.js";
+import { PipelineError, type PipelineFailure } from "../errors.js";
 
 /**
  * Per-item outcome: success value or the error that item threw. The failure
@@ -41,9 +41,10 @@ export interface PoolOptions {
 /**
  * Map over items with bounded concurrency.
  *
- * Always resolves — item failures are captured per-item, never thrown.
- * Returns one slot per input item, in input order: position N holds the
- * outcome for item N, or `undefined` if the item was never dispatched.
+ * Always resolves — item failures are captured per-item, never thrown. A
+ * rejecting gate rejects the pool (an infrastructure fault, not an item
+ * failure). Returns one slot per input item, in input order: position N holds
+ * the outcome for item N, or `undefined` if the item was never dispatched.
  *
  * Dispatch stops on the first observed failure — new items are not sent once
  * one has failed, because under the all-or-nothing policy the run is doomed
@@ -61,9 +62,11 @@ export interface PoolOptions {
  * for an unclaimed item; after the gate releases, the pool re-checks its own
  * failure flag synchronously, so any failure recorded before the release is
  * seen and the item is left as an undefined hole (never dispatched). A
- * failure recorded in the same synchronous step that releases a parked item
- * cannot be observed — inherent to the single-threaded event loop without
- * cancellation — so at most one extra dispatch can escape past a failure.
+ * failure recorded in the same microtask window as a gate release — including
+ * gates that resolve immediately — cannot be observed by the released item's
+ * re-check. Inherent to the single-threaded event loop without cancellation,
+ * so at most one extra pool dispatch (which may itself retry once, so at most
+ * two provider calls) can escape past a failure.
  */
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -106,17 +109,18 @@ export function settleAllOrNothing<R>(
   outcomes: (Outcome<R> | undefined)[],
   total: number,
 ): R[] {
-  const failures = outcomes.flatMap((o, i) =>
-    o && !o.ok ? [{ index: i, error: o.error }] : [],
-  );
-  if (failures.length > 0) {
-    const attempted = outcomes.filter((o) => o !== undefined).length;
-    throw new PipelineError(failures, total, attempted);
-  }
+  const failures: PipelineFailure[] = [];
   const values: R[] = [];
-  for (const o of outcomes) {
-    if (o === undefined || !o.ok) continue; // no failure survives the check above
-    values.push(o.value);
+  let attempted = 0;
+  for (let i = 0; i < outcomes.length; i++) {
+    const o = outcomes[i];
+    if (o === undefined) continue;
+    attempted++;
+    if (o.ok) values.push(o.value);
+    else failures.push({ index: i, error: o.error });
+  }
+  if (failures.length > 0) {
+    throw new PipelineError(failures, total, attempted);
   }
   return values;
 }

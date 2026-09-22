@@ -83,6 +83,18 @@ describe("packEntries", () => {
     if (!packed.ok) return;
     expect(packed.value[0].byteLength).toBe(byteLength(packed.value[0].text));
   });
+
+  it("joins entry blocks verbatim into chunk text", () => {
+    const entries = [entry("a.md", ["one"]), entry("b.md", ["two"])];
+    const packed = packEntries(entries, 10_000);
+    expect(packed.ok).toBe(true);
+    if (!packed.ok) return;
+    // The chunk text is the exact concatenation of its entries' rendered
+    // blocks — no separators, no truncation.
+    expect(packed.value[0].text).toBe(
+      renderEntryBlock(entries[0]) + renderEntryBlock(entries[1]),
+    );
+  });
 });
 
 describe("sliceFile", () => {
@@ -127,6 +139,14 @@ describe("sliceFile", () => {
     expect(sliced.ok).toBe(false);
     if (sliced.ok) return;
     expect(sliced.error.code).toBe("chunk_budget");
+  });
+
+  it("fails when a single line exceeds the part budget", () => {
+    const sliced = sliceFile("a\n" + "x".repeat(50), 10);
+    expect(sliced.ok).toBe(false);
+    if (sliced.ok) return;
+    expect(sliced.error.code).toBe("chunk_budget");
+    expect(sliced.error.message).toContain("exceeding the 10-byte part budget");
   });
 
   it("preserves a trailing newline across multi-part slices", () => {

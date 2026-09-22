@@ -139,9 +139,8 @@ describe("runScan", () => {
   });
 
   it("accumulates hits across multiple chunks (one model call per chunk)", async () => {
-    // Back-solve a context small enough that the 3 entries pack into >=2 chunks.
-    // budget = floor(tokens * 3.5 * 0.218). Entry blocks are 96/64/99 bytes, so a
-    // 228-byte budget (tokens=300) fits the first two (160) but not the third.
+    // A context small enough that the 3 entries pack into >=2 chunks, so every
+    // chunk gets its own model call.
     const multiOpts: ChadOptions = {
       ...opts,
       availableContext: 300,

@@ -113,10 +113,9 @@ projects:
     // Force a multi-chunk stage-1 split so both TOC paths are echoed by more than
     // one independent chunk call. Upstream dedup must collapse them so each file
     // is drilled (and appears in the hits) exactly once — no double-drill.
-    // Entry blocks are ~102/93 bytes (path length varies with the tmp dir), summing
-    // to ~195; a 152-byte budget (tokens=200 -> floor(200*3.5*0.218)) fits one block
-    // but not both, so they split into 2 chunks. The window (max block < budget < sum)
-    // is wide enough to absorb tmp-path length variation.
+    // The budget is sized between the largest single entry block and the sum of
+    // both, so they split into 2 chunks with room to absorb tmp-path length
+    // variation.
     const multiOpts: ChadOptions = { ...opts, availableContext: 200 };
     const scanPaths = [
       join(tmp, "projects/alpha/docs/garden.md"),
