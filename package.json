@@ -1,6 +1,6 @@
 {
   "name": "research-chad",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "A plugin for Opencode to scan an LLM generated table of contents for data retrieval from local LLM distilled files.",
   "repository": {
     "type": "git",

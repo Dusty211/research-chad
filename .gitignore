@@ -19,5 +19,9 @@ Thumbs.db
 # Pre-publish testing
 *.tgz
 
+# Private local config (plugin deployment + personal options)
+.opencode/opencode.json
+.opencode/opencode.jsonc
+
 # Development
 code-review/
