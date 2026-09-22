@@ -50,11 +50,8 @@ export async function runDrill(
 
   const outcomes = await mapWithConcurrency(
     candidates,
-    { concurrency: opts.inferenceConcurrency },
-    async (entry) => {
-      if (limiter) await limiter.acquire();
-      return drillOne(ctx, opts, query, entry, maxBytes, limiter);
-    },
+    { concurrency: opts.inferenceConcurrency, gate: limiter ?? undefined },
+    async (entry) => drillOne(ctx, opts, query, entry, maxBytes, limiter),
   );
 
   // Past this point every value is a settled Hit | null; undefined (never

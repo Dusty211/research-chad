@@ -73,7 +73,10 @@ export class PipelineError extends AppError {
   readonly failures: PipelineFailure[];
   /** Total items in the batch. */
   readonly total: number;
-  /** Items dispatched before the first failure stopped new dispatches. */
+  /**
+   * Items that began executing — an item parked at the rate-limit gate when a
+   * failure was recorded is not counted; one already past the gate is.
+   */
   readonly attempted: number;
 
   constructor(failures: PipelineFailure[], total: number, attempted: number) {

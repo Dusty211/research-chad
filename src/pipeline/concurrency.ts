@@ -22,10 +22,20 @@ function toError(error: unknown): Error {
   return new Error(`item rejected with a non-Error value (${typeof error})`);
 }
 
+/**
+ * A pacing gate the pool consults before every dispatch. The pool knows a
+ * gate, not intervals or clocks — RateLimiter satisfies this structurally.
+ */
+export interface Gate {
+  acquire(): Promise<void>;
+}
+
 /** Pool configuration for bounded-concurrency dispatch. */
 export interface PoolOptions {
   /** Max items in-flight simultaneously. Must be >= 1. */
   concurrency: number;
+  /** Optional gate consulted before every dispatch (e.g. a rate limiter). */
+  gate?: Gate;
 }
 
 /**
@@ -45,9 +55,15 @@ export interface PoolOptions {
  * "never ran" when reporting attempted vs total. With concurrency 1 this is
  * equivalent to a sequential for-loop that halts at the first throw.
  *
- * The pool has no notion of timing: rate limiting is a separate RateLimiter
- * composed around fn by the caller, so every individual dispatch — including
- * the first wave — passes through the valve.
+ * Pacing is a separate concern supplied as an optional gate, consulted before
+ * every individual dispatch — including the first wave. The claim and the
+ * gate wait happen in one synchronous segment, so no worker holds a gate slot
+ * for an unclaimed item; after the gate releases, the pool re-checks its own
+ * failure flag synchronously, so any failure recorded before the release is
+ * seen and the item is left as an undefined hole (never dispatched). A
+ * failure recorded in the same synchronous step that releases a parked item
+ * cannot be observed — inherent to the single-threaded event loop without
+ * cancellation — so at most one extra dispatch can escape past a failure.
  */
 export async function mapWithConcurrency<T, R>(
   items: readonly T[],
@@ -61,8 +77,11 @@ export async function mapWithConcurrency<T, R>(
   let failed = false;
 
   async function worker(): Promise<void> {
-    while (!failed && next < items.length) {
+    for (;;) {
+      if (failed || next >= items.length) break; // no new claims once a failure has landed
       const i = next++;
+      if (opts.gate) await opts.gate.acquire();
+      if (failed) continue; // parked at the gate when a failure was recorded: hole, never dispatched
       try {
         results[i] = { ok: true, value: await fn(items[i], i) };
       } catch (error) {

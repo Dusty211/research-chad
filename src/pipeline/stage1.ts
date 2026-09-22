@@ -59,16 +59,14 @@ export async function runStage1(
 
   const outcomes = await mapWithConcurrency(
     packed.value,
-    { concurrency: opts.inferenceConcurrency },
-    async (chunk) => {
-      if (limiter) await limiter.acquire();
-      return generateChecked(
+    { concurrency: opts.inferenceConcurrency, gate: limiter ?? undefined },
+    async (chunk) =>
+      generateChecked(
         ctx,
         opts.model,
         buildChunkPrompt(query, chunk.text),
         parseChunkResult,
-      );
-    },
+      ),
   );
 
   // Past this point every outcome is a success; undefined means the item was

@@ -1,7 +1,10 @@
 import { describe, it, expect } from "vitest";
 import { PipelineError } from "../errors.js";
-import { mapWithConcurrency, settleAllOrNothing } from "./concurrency.js";
-import { RateLimiter } from "./rate-limiter.js";
+import {
+  mapWithConcurrency,
+  settleAllOrNothing,
+  type Gate,
+} from "./concurrency.js";
 
 const POOL = { concurrency: 1 };
 
@@ -211,49 +214,87 @@ describe("mapWithConcurrency", () => {
   });
 });
 
-describe("mapWithConcurrency + RateLimiter (composition)", () => {
-  it("paces every dispatch through the valve, including the first wave", async () => {
-    // The regression C-S1 exists for: with concurrency > 1 the old code let
-    // each worker read the other's just-written timestamp and burst. Now every
-    // individual dispatch — first wave included — is spaced by the interval.
-    const limiter = new RateLimiter(60);
-    const dispatchTimes: number[] = [];
-    await mapWithConcurrency([1, 2, 3, 4], { concurrency: 2 }, async (n) => {
-      await limiter.acquire();
-      dispatchTimes.push(performance.now());
-      await new Promise((r) => setTimeout(r, 5));
-      return n;
-    });
-
-    expect(dispatchTimes).toHaveLength(4);
-    const start = dispatchTimes[0];
-    for (let i = 1; i < dispatchTimes.length; i++) {
-      // Each dispatch lands near t + i*interval: spaced, never burst.
-      expect(dispatchTimes[i] - start).toBeGreaterThanOrEqual(i * 60 - 25);
-      expect(dispatchTimes[i] - start).toBeLessThan(i * 60 + 50);
-    }
+describe("mapWithConcurrency + gate", () => {
+  it("consults the gate once per dispatch", async () => {
+    let count = 0;
+    const gate: Gate = {
+      acquire: async () => {
+        count++;
+      },
+    };
+    await mapWithConcurrency(
+      [1, 2, 3],
+      { concurrency: 2, gate },
+      async (n) => n,
+    );
+    expect(count).toBe(3);
   });
 
-  it("keeps the concurrency bound while the valve paces dispatches", async () => {
-    // Concurrency and rate limit are independent: 2 in-flight, one dispatch
-    // per interval. Total wall time is driven by the valve, not by the pool.
-    const limiter = new RateLimiter(40);
-    let inFlight = 0;
-    let maxInFlight = 0;
-    const start = performance.now();
-    await mapWithConcurrency([1, 2, 3, 4], { concurrency: 2 }, async (n) => {
-      await limiter.acquire();
-      inFlight++;
-      maxInFlight = Math.max(maxInFlight, inFlight);
-      await new Promise((r) => setTimeout(r, 10));
-      inFlight--;
-      return n;
+  it("does not consult the gate for items never claimed after a failure", async () => {
+    let count = 0;
+    let releaseSecond: () => void = () => {};
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
     });
-    const span = performance.now() - start;
+    // The second acquire parks w1 at the gate so it cannot claim items 3–4.
+    const gate: Gate = {
+      acquire: async () => {
+        count++;
+        if (count === 2) await second;
+      },
+    };
+    const run = mapWithConcurrency(
+      [1, 2, 3, 4],
+      { concurrency: 2, gate },
+      async (n) => {
+        if (n === 1) {
+          await Promise.resolve(); // failure lands after one microtask
+          throw new Error("boom");
+        }
+        return n;
+      },
+    );
+    // Yield for the failure to be recorded, then release so the run settles.
+    await Promise.resolve();
+    await Promise.resolve();
+    releaseSecond();
+    const result = await run;
 
-    expect(maxInFlight).toBeLessThanOrEqual(2);
-    // Unthrottled this would finish in ~40ms; the valve stretches it to >= 120.
-    expect(span).toBeGreaterThanOrEqual(110);
+    expect(count).toBe(2); // items 3–4 never claimed, gate never consulted for them
+    expect(result[2]).toBeUndefined();
+    expect(result[3]).toBeUndefined();
+  });
+
+  it("leaves a hole for an item parked at the gate when a failure was recorded before release", async () => {
+    let releaseSecond: () => void = () => {};
+    const second = new Promise<void>((resolve) => {
+      releaseSecond = resolve;
+    });
+    let n = 0;
+    const gate: Gate = {
+      acquire: async () => {
+        if (++n === 2) await second;
+      },
+    };
+    const run = mapWithConcurrency(
+      [1, 2],
+      { concurrency: 2, gate },
+      async (item) => {
+        if (item === 1) {
+          await Promise.resolve();
+          throw new Error("boom");
+        }
+        return item;
+      },
+    );
+    // Yield for item 1's failure to be recorded, then release the parked item.
+    await Promise.resolve();
+    await Promise.resolve();
+    releaseSecond();
+    const result = await run;
+
+    expect(result[0]).toMatchObject({ ok: false });
+    expect(result[1]).toBeUndefined(); // hole, not a failure — never dispatched
   });
 });
 
