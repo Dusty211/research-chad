@@ -49,6 +49,8 @@ OpenCode installs the plugin itself — you only reference it in your config (`o
 
 The first four options are required; `inferenceConcurrency` and `inferenceRateLimitMs` are optional (defaults shown). After adding or changing the config, restart the OpenCode service (`opencode service restart`) to pick it up.
 
+Plugin options are machine-specific (your corpus paths, your model), so keep them out of any committed config. OpenCode merges `plugins` arrays across config layers (lowest to highest precedence: `~/.config/opencode/opencode.json`, then the project `opencode.json`, then `.opencode/opencode.json`). Put the plugin entry in a layer you don't commit — for this repo, `.opencode/opencode.json` is gitignored for exactly this purpose. Committed configs should carry only shared settings (such as `references`).
+
 ## Errors
 
 If any option is missing or invalid, both tools are registered as hard errors: every call returns `{ "ok": false, "error": { "code": "options", ... } }` with the specific validation message. Fix the config and restart the service.

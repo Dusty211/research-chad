@@ -46,6 +46,15 @@ An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/ind
 - Single test: `npx vitest run -t "test name substring"` or `npx vitest run src/index.test.ts`
 - `npm run docs:grab` — fetch OpenCode V2 doc pages into `opencode-docs/plugin-docs/`; `-- --help` for usage (no args = defaults, `-u <url> [-o <file>]` for specific pages)
 
+## Local testing ritual
+
+The loop for testing a build before publishing:
+
+1. `npm run pack:local` — builds `dist/` and packs `research-chad-<version>.tgz` into the repo root (gitignored via `*.tgz`). The tgz is byte-for-byte what `npm publish` would ship, so testing it is testing the publish artifact.
+2. Point the private config at it: set the package spec in `.opencode/opencode.json` to `research-chad@file:///<absolute path to the tgz>`. Use an **absolute** path — relative `file:` specs resolve against the server cwd, not the config file, and fail with ENOENT. The filename embeds the version, so bumping the version requires updating this line (a stale name fails loudly at load, which is good).
+3. `opencode service restart` — then verify the plugin loaded (e.g. `opencode plugin list`) and exercise the tools.
+4. When satisfied: `npm publish`, then flip the spec back to the bare `research-chad` (registry) and restart. The bare name resolves to whatever is published — until you publish a new version, it silently serves the old one.
+
 ## Tooling notes
 
 - ESLint 10 flat config in `eslint.config.js`: typescript-eslint recommended + Prettier. The prettier plugin's preset uses the legacy `extends` key which flat config rejects, so it is expanded manually in that file — don't "simplify" it back to `eslintPluginPrettier.configs.recommended`.
@@ -58,3 +67,4 @@ An OpenCode v2 plugin (`@opencode/plugin` peer dep). Single source file `src/ind
 - The plugin runs under Bun in OpenCode, but tests run under Node: keep `src/` free of `Bun.*` globals so both can import it (`node:` builtins work in both).
 - Tool `input` arrives typed as `unknown` by design — validate/cast by hand in `execute`, don't rely on JSON Schema inference.
 - `module: NodeNext` + ESM: relative imports in `src/` need explicit `.js` extensions (even for `.ts` files).
+- Config layering: the committed `opencode.json` holds only shared settings (`references`). Plugin deployment + personal options live in `.opencode/opencode.json`, which is gitignored on purpose — never commit it, and don't "clean up" the gitignore rule. OpenCode merges `plugins` arrays across config layers; the private layer is where the local-test spec lives (see Local testing ritual).
