@@ -10,7 +10,6 @@ import { runDrill } from "./drill.js";
 import type { GenerateCtx } from "./model.js";
 import type { ChadOptions } from "../options.js";
 import type { TocEntry } from "../types.js";
-import { makeManualClock } from "../testutil/clock.js";
 
 const MATCH_REASON =
   "Covers garden soil preparation. Gives exact steps. References the spring planting guide.";
@@ -365,12 +364,11 @@ describe("runDrill", () => {
     });
   });
 
-  it("paces every overflow-fold dispatch through the valve when inferenceRateLimitMs > 0", async () => {
+  it("passes every overflow-fold dispatch through the gate", async () => {
     // One over-budget candidate forces a multi-part fold. Invariant pinned:
-    // every model call — part calls and the final fold — passes through the
-    // valve with the configured interval. The manual clock makes the spacing
-    // exact: each release lands precisely one interval after the last, so a
-    // mangled or dropped interval value would fail here.
+    // every model call — part calls and the final fold — acquires a gate slot.
+    // An observing gate makes this a pure count: no clock, no pacing math
+    // (valve spacing is RateLimiter's contract, covered in rate-limiter.test.ts).
     const bigDir = join(tmp, "projects/alpha/docs");
     const bigContent = Array.from(
       { length: 100 },
@@ -379,15 +377,8 @@ describe("runDrill", () => {
     await writeFile(join(bigDir, "throttled.md"), bigContent, "utf8");
 
     const fileSize = new TextEncoder().encode(bigContent).length;
-    const throttledOpts = {
-      ...optsForBudget(opts, fileSize, 2),
-      inferenceRateLimitMs: 40,
-    };
-    const { clock, advance, releases } = makeManualClock();
-
     let partCalls = 0;
     let foldCalls = 0;
-    let finalDone = false;
     const ctx: GenerateCtx = {
       generate: {
         text: async ({ prompt }) => {
@@ -402,7 +393,6 @@ describe("runDrill", () => {
           }
           // Final fold call — the last dispatch of the run.
           foldCalls++;
-          finalDone = true;
           return {
             text: JSON.stringify({ match: true, matchReason: MATCH_REASON }),
           };
@@ -410,35 +400,28 @@ describe("runDrill", () => {
       },
     };
 
-    const run = runDrill(
+    const acquires: number[] = [];
+    const gate = {
+      acquire: async () => {
+        acquires.push(1);
+      },
+    };
+
+    const hits = await runDrill(
       ctx,
-      throttledOpts,
+      optsForBudget(opts, fileSize, 2),
       "garden soil",
       [docEntry("throttled.md", join(bigDir, "throttled.md"))],
-      clock,
+      undefined,
+      gate,
     );
-    // The file read is real async I/O and each fold step reserves its valve
-    // slot lazily at its own acquire, so the clock must be driven from outside:
-    // spin the event loop (setImmediate lets the I/O callback and each
-    // acquire+dispatch run) and advance one interval per lap until the final
-    // fold call has fired. Every slot therefore reserves at the current time
-    // and is released by a subsequent advance, so releases land exactly one
-    // interval apart.
-    for (let i = 0; i < 20 && !finalDone; i++) {
-      await new Promise((r) => setImmediate(r));
-      advance(40);
-    }
-    const hits = await run;
 
     expect(hits).toHaveLength(1);
-    // The fold actually ran multiple dispatches (parts + final fold), all of
-    // which passed through the valve — every release is exactly one interval
-    // after the last, on the injected clock.
+    // Every gate acquisition is accounted for: the pool acquires once per
+    // candidate item, and the overflow fold acquires once per model call
+    // (parts + final fold). Nothing dispatches without a slot.
     expect(partCalls).toBeGreaterThanOrEqual(2);
     expect(foldCalls).toBe(1);
-    expect(releases.length).toBeGreaterThanOrEqual(3);
-    for (let i = 1; i < releases.length; i++) {
-      expect(releases[i] - releases[i - 1]).toBe(40);
-    }
+    expect(acquires.length).toBe(1 + partCalls + foldCalls);
   });
 });

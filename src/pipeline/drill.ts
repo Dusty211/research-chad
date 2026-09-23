@@ -36,6 +36,9 @@ import { makeGate, type Clock } from "./rate-limiter.js";
  * The overflow fold within a single candidate stays sequential — it threads a
  * running distill forward, a true dependency chain, not parallelizable work —
  * but each of its dispatches still passes through the valve.
+ *
+ * `gate` overrides the constructed valve (tests inject an observing gate);
+ * omitted, the valve is built from opts.inferenceRateLimitMs and clock.
  */
 export async function runDrill(
   ctx: GenerateCtx,
@@ -43,17 +46,18 @@ export async function runDrill(
   query: string,
   candidates: TocEntry[],
   clock?: Clock,
+  gate?: Gate,
 ): Promise<Hit[]> {
   const maxBytes = chunkBudgetBytes(opts.availableContext);
 
   // The valve paces every individual dispatch; the pool bounds how many are
   // in-flight. Composed here so neither concern knows about the other.
-  const gate = makeGate(opts.inferenceRateLimitMs, clock);
+  const effectiveGate = gate ?? makeGate(opts.inferenceRateLimitMs, clock);
 
   const outcomes = await mapWithConcurrency(
     candidates,
-    { concurrency: opts.inferenceConcurrency, gate },
-    async (entry) => drillOne(ctx, opts, query, entry, maxBytes, gate),
+    { concurrency: opts.inferenceConcurrency, gate: effectiveGate },
+    async (entry) => drillOne(ctx, opts, query, entry, maxBytes, effectiveGate),
   );
 
   // Past this point every value is a settled Hit | null; undefined (never
