@@ -89,6 +89,10 @@ describe("parsePages", () => {
   it("rejects a URL that does not parse", () => {
     expect(() => parsePages(["-u", "not-a-url"])).toThrow(/invalid URL/);
   });
+
+  it("rejects a URL value containing a space", () => {
+    expect(() => parsePages(["-u", "https://x.com/a b/"])).toThrow();
+  });
 });
 
 describe("filenameFromUrl", () => {

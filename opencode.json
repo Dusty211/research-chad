@@ -1,6 +1,5 @@
 {
   "$schema": "https://opencode.ai/config.json",
-  "plugins": ["research-chad"],
   "references": {
     "opencode-docs": {
       "path": "./opencode-docs",
